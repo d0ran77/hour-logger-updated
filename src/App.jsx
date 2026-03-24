@@ -5,6 +5,12 @@ import {
   X, ChevronUp, Share, CheckCircle
 } from 'lucide-react';
 
+// ============================================================================
+// DEVELOPER SETUP INSTRUCTIONS:
+// Paste your Google Client ID here. Your users will NOT see this.
+// ============================================================================
+const GOOGLE_CLIENT_ID = '';
+
 const i18n = {
   en: { 
     brand: "Built By Liam", title_part1: "Clinical", title_part2: "Log.", 
@@ -105,6 +111,10 @@ export default function App() {
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('liam_has_seen_welcome'));
 
+  // Google Sync States
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
+
   const isDark = theme === 'dark';
 
   // --- PERSISTENCE ---
@@ -120,6 +130,17 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // --- LOAD GOOGLE SCRIPT ---
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setIsScriptLoaded(true);
+    document.body.appendChild(script);
+    return () => document.body.removeChild(script);
   }, []);
 
   // --- LOGIC ---
@@ -193,8 +214,112 @@ export default function App() {
     }
   };
 
+  // --- GOOGLE SYNC LOGIC ---
   const handleGoogleSync = () => {
-    alert("Google Calendar Sync initialized.\n\nNote: To complete the live connection, ensure your OAuth Credentials are fully configured in the Google Cloud Console and added to your deployment variables.");
+    if (!GOOGLE_CLIENT_ID) {
+      alert('Developer Error: Missing Google Client ID at the top of the file.');
+      return;
+    }
+    if (!isScriptLoaded) {
+      alert('Google connection script is still loading. Please try again in a moment.');
+      return;
+    }
+
+    setIsSyncing(true);
+
+    try {
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/calendar.readonly',
+        callback: (tokenResponse) => {
+          if (tokenResponse && tokenResponse.access_token) {
+            fetchCalendarEvents(tokenResponse.access_token);
+          } else {
+            setIsSyncing(false);
+            alert('Failed to authorize Google Calendar.');
+          }
+        },
+        error_callback: () => {
+          setIsSyncing(false);
+        }
+      });
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } catch (err) {
+      setIsSyncing(false);
+      alert('Failed to initialize Google Login. Make sure you are running on HTTPS.');
+    }
+  };
+
+  const fetchCalendarEvents = async (accessToken) => {
+    try {
+      // Fetch events from the start of the current cycle (e.g., Sept 1st) to today
+      const now = new Date();
+      const cycleStart = new Date(now.getFullYear() - (now.getMonth() < 8 ? 1 : 0), 8, 1);
+      
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${cycleStart.toISOString()}&timeMax=${now.toISOString()}&maxResults=500&singleEvents=true&orderBy=startTime`,
+        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
+      );
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message);
+
+      let importedCount = 0;
+      const newEntries = [];
+
+      // existing event signatures to prevent duplicate syncing
+      const existingSignatures = new Set(entries.map(e => `${e.date}-${e.hours}-${e.type}`));
+
+      data.items?.forEach(event => {
+        if (!event.start.dateTime || !event.end.dateTime) return; // Skip all-day events
+
+        const summary = (event.summary || '').toLowerCase();
+        let matchedType = null;
+
+        // Check against user-defined keywords
+        const checkKeywords = (type) => {
+          const keys = (settings.keywords[type] || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+          return keys.some(k => summary.includes(k));
+        };
+
+        if (checkKeywords('client')) matchedType = 'client';
+        else if (checkKeywords('super')) matchedType = 'super';
+        else if (checkKeywords('therapy')) matchedType = 'therapy';
+        else if (checkKeywords('cpd')) matchedType = 'cpd';
+
+        if (!matchedType) return; // Skip if it doesn't match any keyword
+
+        const start = new Date(event.start.dateTime);
+        const end = new Date(event.end.dateTime);
+        const hours = parseFloat(((end - start) / (1000 * 60 * 60)).toFixed(1));
+        const dateStr = start.toISOString().split('T')[0];
+
+        // Basic duplicate prevention
+        const sig = `${dateStr}-${hours}-${matchedType}`;
+        if (!existingSignatures.has(sig)) {
+          newEntries.push({
+            id: Date.now() + Math.random(),
+            type: matchedType,
+            date: dateStr,
+            hours: hours,
+            notes: `Synced from Calendar: ${event.summary}`
+          });
+          existingSignatures.add(sig);
+          importedCount++;
+        }
+      });
+
+      if (newEntries.length > 0) {
+        setEntries(prev => [...newEntries, ...prev]);
+        alert(`Successfully imported ${importedCount} new entries based on your keywords!`);
+      } else {
+        alert("No new matching events found (they might already be synced, or no keywords matched).");
+      }
+    } catch (err) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleICal = async (e) => {
@@ -401,8 +526,16 @@ export default function App() {
               </button>
               {openAccordion === 'sync' && (
                 <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <button onClick={handleGoogleSync} className={`w-full py-4 border-2 hover:border-[#FF7A00] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                    <Calendar className="w-4 h-4" /> {t.btn_sync}
+                  <button 
+                    onClick={handleGoogleSync} 
+                    disabled={isSyncing}
+                    className={`w-full py-4 border-2 hover:border-[#FF7A00] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'border-white/10' : 'border-black/10'}`}
+                  >
+                    {isSyncing ? (
+                      <><RefreshCw className="w-4 h-4 animate-spin" /> SYNCING...</>
+                    ) : (
+                      <><Calendar className="w-4 h-4" /> {t.btn_sync}</>
+                    )}
                   </button>
                   <div className="relative">
                     <input type="file" accept=".ics" onChange={handleICal} className="absolute inset-0 opacity-0 cursor-pointer" />
