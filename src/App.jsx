@@ -9,7 +9,7 @@ import {
 // DEVELOPER SETUP INSTRUCTIONS:
 // Paste your Google Client ID here. Your users will NOT see this.
 // ============================================================================
-const GOOGLE_CLIENT_ID = '';
+const GOOGLE_CLIENT_ID = '1096186568274-ba5t2npnha0gt0latstffcejbcfgfgiv.apps.googleusercontent.com';
 
 const i18n = {
   en: { 
