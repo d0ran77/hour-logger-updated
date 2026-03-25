@@ -116,6 +116,10 @@ export default function App() {
   const [showCookies, setShowCookies] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // Custom Two-Tap Confirmation States (Bypasses iframe alert blocks)
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
 
@@ -206,7 +210,7 @@ export default function App() {
     const hours = parseFloat(data.get('hours'));
     const date = data.get('date');
     if (!hours || !date) return;
-    setEntries([{ id: Date.now(), type: data.get('type'), date, hours, notes: "" }, ...entries]);
+    setEntries([{ id: Date.now(), type: data.get('type'), date, hours, title: "", notes: "" }, ...entries]);
     e.target.reset();
     notify("Entry added to log.");
   };
@@ -218,7 +222,7 @@ export default function App() {
   };
 
   const handleResetParams = () => {
-    if(window.confirm("Reset all settings to default?")) {
+    if (resetConfirm) {
       setSettings({
         lang: 'en', isTrainee: false, goal: 0, cpdGoal: 0, globalGoal: 0, superGoal: 0, ratioSuper: 1, ratioClient: 6, trackRatio: true,
         showNomenclature: false, showStartingBalances: false, showKeywords: false,
@@ -229,7 +233,11 @@ export default function App() {
         enableGlobalStart: false,
         globalStartDate: `${new Date().getFullYear()}-09-01`
       });
+      setResetConfirm(false);
       notify("Parameters reset.");
+    } else {
+      setResetConfirm(true);
+      setTimeout(() => setResetConfirm(false), 3000);
     }
   };
 
@@ -296,7 +304,7 @@ export default function App() {
         const dateStr = start.toISOString().split('T')[0];
         const sig = `${dateStr}-${hours}-${matchedType}`;
         if (!existingSignatures.has(sig)) {
-          newEntries.push({ id: Date.now() + Math.random(), type: matchedType, date: dateStr, hours: hours, notes: `Synced: ${event.summary}` });
+          newEntries.push({ id: Date.now() + Math.random(), type: matchedType, date: dateStr, hours: hours, title: event.summary, notes: "" });
           existingSignatures.add(sig);
           importedCount++;
         }
@@ -314,7 +322,7 @@ export default function App() {
 
   const shareNote = async () => {
     if (!reflectionEntry) return;
-    const content = `Reflection: ${labels[reflectionEntry.type].toUpperCase()}\nDate: ${reflectionEntry.date}\nHours: ${reflectionEntry.hours}\n\nNotes:\n${reflectionEntry.notes || '(Empty)'}`;
+    const content = `Reflection: ${labels[reflectionEntry.type].toUpperCase()}\nDate: ${reflectionEntry.date}\nHours: ${reflectionEntry.hours}\n${reflectionEntry.title ? `Title: ${reflectionEntry.title}\n` : ''}\nNotes:\n${reflectionEntry.notes || '(Empty)'}`;
     if (navigator.share) {
       await navigator.share({ title: `Practisy Note`, text: content });
     } else {
@@ -324,8 +332,8 @@ export default function App() {
   };
 
   const exportCSV = async () => {
-    const rows = displayedEntries.map(e => `"${e.date}","${labels[e.type]}","${e.hours}","${(e.notes || '').replace(/\n/g, ' ')}"`);
-    const csvContent = "Date,Type,Hours,Notes\n" + rows.join("\n");
+    const rows = displayedEntries.map(e => `"${e.date}","${labels[e.type]}","${(e.title || '').replace(/"/g, '""')}","${e.hours}","${(e.notes || '').replace(/\n/g, ' ').replace(/"/g, '""')}"`);
+    const csvContent = "Date,Type,Title,Hours,Notes\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'practisy_log.csv'; a.click();
     notify("CSV Export ready.");
@@ -368,7 +376,7 @@ export default function App() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     doc.text("Practisy Clinical Log", 14, 20);
-    doc.autoTable({ startY: 25, head: [['Date', 'Type', 'Hours', 'Notes']], body: displayedEntries.map(e => [e.date, labels[e.type], e.hours, e.notes]) });
+    doc.autoTable({ startY: 25, head: [['Date', 'Type', 'Title', 'Hours', 'Notes']], body: displayedEntries.map(e => [e.date, labels[e.type], e.title || '', e.hours, e.notes || '']) });
     doc.save('practisy_log.pdf');
     notify("PDF generated.");
   };
@@ -377,15 +385,19 @@ export default function App() {
     const goal = settings[goalKey];
     const isGoalMet = settings.isTrainee && goal > 0 && val >= goal;
     return (
-      <div className={`p-6 md:p-8 border-r border-b lg:border-b-0 flex flex-col justify-between h-[150px] md:h-[180px] transition-all duration-500 relative overflow-hidden ${isGoalMet ? 'bg-[#FF7A00]/10' : (isDark ? 'border-white/5' : 'border-black/10')}`}>
+      <div className={`p-6 md:p-8 border-r border-b lg:border-b-0 flex flex-col justify-between h-[160px] md:h-[180px] transition-all duration-500 relative overflow-hidden ${isGoalMet ? 'bg-[#FF7A00]/10' : (isDark ? 'border-white/5' : 'border-black/10')}`}>
         {isGoalMet && <div className="absolute -top-10 -right-10 w-32 h-32 bg-[#FF7A00] opacity-20 blur-3xl rounded-full" />}
         <div className="flex justify-between items-start relative z-10">
           <span className="text-sm font-black uppercase tracking-[0.3em] opacity-40">{label}</span>
           {isGoalMet && <CheckCircle className="w-4 h-4 text-[#FF7A00]" />}
         </div>
-        <div className="text-5xl md:text-6xl font-black tabular-nums leading-none relative z-10">
-          {val.toFixed(1)}
-          {settings.isTrainee && goal > 0 && <span className="text-xl md:text-2xl ml-1 opacity-20">/ {goal}</span>}
+        <div className="relative z-10 flex flex-col">
+          <div className="text-5xl md:text-6xl font-black tabular-nums leading-none">
+            {val.toFixed(1)}
+          </div>
+          <div className="h-4 md:h-5 mt-2">
+             {settings.isTrainee && goal > 0 && <span className="text-[10px] md:text-xs font-bold opacity-40 uppercase tracking-widest">/ {goal} Target</span>}
+          </div>
         </div>
       </div>
     );
@@ -671,7 +683,9 @@ export default function App() {
 
                    <div className="pt-6 space-y-3">
                      <button onClick={handleSaveParams} className={`w-full py-5 border-2 hover:border-[#FF7A00] hover:text-[#FF7A00] font-black text-sm uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>{saveStatus || "SAVE PARAMETERS"}</button>
-                     <button onClick={handleResetParams} className="w-full py-5 text-rose-500 hover:bg-rose-500/10 font-black text-sm uppercase tracking-widest transition-all">RESET ALL</button>
+                     <button onClick={handleResetParams} className={`w-full py-5 font-black text-sm uppercase tracking-widest transition-all ${resetConfirm ? 'bg-rose-500 text-white shadow-lg' : 'text-rose-500 hover:bg-rose-500/10'}`}>
+                        {resetConfirm ? "CONFIRM RESET?" : "RESET ALL"}
+                     </button>
                    </div>
                 </div>
               )}
@@ -680,17 +694,23 @@ export default function App() {
 
           <main className="lg:col-span-8">
             <div className="space-y-8">
-              <div className={`flex justify-between items-end border-b pb-6 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                <button onClick={() => setOpenAccordion(openAccordion === 'records' ? null : 'records')} className="flex items-center gap-3 group">
-                  <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 transition-all">Active Records</h3>
-                  <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'records' ? '' : 'rotate-180'}`} />
-                </button>
+              <div className={`flex flex-col md:flex-row md:justify-between md:items-end border-b pb-6 gap-4 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                <div>
+                  <button onClick={() => setOpenAccordion(openAccordion === 'records' ? null : 'records')} className="flex items-center gap-3 group">
+                    <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 transition-all">Active Records</h3>
+                    <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'records' ? '' : 'rotate-180'}`} />
+                  </button>
+                  <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#FF7A00] opacity-80 mt-2 flex items-center gap-2">
+                    <BookOpen className="w-3 h-3" /> Tap any record below to manage clinical notes
+                  </p>
+                </div>
                 <div className="flex gap-5 opacity-60">
                   <Table className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportCSV} title="Export CSV" />
                   <Download className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportCSV} title="Download Records" />
                   <Printer className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportPDF} title="Print PDF" />
                 </div>
               </div>
+              
               {openAccordion === 'records' && (
                 <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scroll">
                   {displayedEntries.map(e => (
@@ -699,12 +719,15 @@ export default function App() {
                         <div className={`w-1.5 h-14 ${e.type === 'super' ? 'bg-[#FF7A00]' : (isDark ? 'bg-white/10' : 'bg-black/10')}`} />
                         <div>
                           <p className="text-base font-black uppercase tracking-widest">{labels[e.type]}</p>
-                          <p className="text-sm opacity-50 font-bold">{e.date}</p>
+                          {e.title && <p className="text-sm font-bold opacity-80 mt-0.5 truncate max-w-[150px] md:max-w-xs">{e.title}</p>}
+                          <p className={`text-sm font-bold ${e.title ? 'opacity-40 mt-1' : 'opacity-50'}`}>{e.date}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-8">
+                      <div className="flex items-center gap-6 md:gap-8">
+                        {e.notes && e.notes.trim() !== '' && (
+                          <BookOpen className="w-5 h-5 text-[#FF7A00] opacity-60" title="Contains Notes" />
+                        )}
                         <p className="text-3xl font-black tabular-nums">{e.hours.toFixed(1)}H</p>
-                        <Trash2 onClick={(ev) => { ev.stopPropagation(); setEntries(entries.filter(ent => ent.id !== e.id)); notify("Entry removed."); }} className="w-6 h-6 text-rose-500 opacity-0 group-hover:opacity-100" />
                       </div>
                     </div>
                   ))}
@@ -864,16 +887,45 @@ export default function App() {
                 </div>
                 <p className="text-sm font-bold opacity-40 tracking-widest uppercase">{reflectionEntry.date} | {reflectionEntry.hours.toFixed(1)} Hours</p>
               </div>
-              <X onClick={() => setReflectionEntry(null)} className="w-7 h-7 cursor-pointer opacity-40 hover:opacity-100" />
+              <X onClick={() => { setReflectionEntry(null); setConfirmDelete(false); }} className="w-7 h-7 cursor-pointer opacity-40 hover:opacity-100" />
             </div>
-            <textarea className="flex-1 bg-transparent border-b py-6 text-lg outline-none focus:border-[#FF7A00] resize-none leading-relaxed min-h-[300px]" value={reflectionEntry.notes} onChange={e => {
+            
+            <input 
+              type="text"
+              placeholder="Reflection Title (Optional)"
+              className="w-full bg-transparent border-b border-dashed border-[#FF7A00]/30 pb-4 mb-6 text-xl md:text-2xl font-black outline-none focus:border-[#FF7A00] transition-colors placeholder:opacity-30"
+              value={reflectionEntry.title || ''}
+              onChange={e => {
+                const newEntries = entries.map(ent => ent.id === reflectionEntry.id ? {...ent, title: e.target.value} : ent);
+                setEntries(newEntries);
+                setReflectionEntry({...reflectionEntry, title: e.target.value});
+              }}
+            />
+
+            <textarea className="flex-1 bg-transparent border-b py-6 text-lg outline-none focus:border-[#FF7A00] resize-none leading-relaxed min-h-[250px]" value={reflectionEntry.notes} onChange={e => {
                 const newEntries = entries.map(ent => ent.id === reflectionEntry.id ? {...ent, notes: e.target.value} : ent);
                 setEntries(newEntries);
                 setReflectionEntry({...reflectionEntry, notes: e.target.value});
               }} placeholder="Begin clinical reflection..." />
-            <div className="pt-10 flex gap-6 shrink-0">
-              <button onClick={() => { setReflectionEntry(null); notify("Reflection committed."); }} className="flex-1 py-6 bg-[#FF7A00] text-white font-black uppercase tracking-[0.4em] text-xs shadow-lg hover:brightness-110">Commit</button>
-              <button onClick={shareNote} className="flex-1 py-6 border-2 font-black uppercase tracking-[0.4em] text-xs flex items-center justify-center gap-3 hover:border-[#FF7A00]"><Share className="w-5 h-5" /> Share</button>
+            <div className="pt-8 md:pt-10 flex flex-col md:flex-row gap-4 md:gap-6 shrink-0">
+              <button onClick={() => { setReflectionEntry(null); setConfirmDelete(false); notify("Reflection committed."); }} className="flex-1 py-5 md:py-6 bg-[#FF7A00] text-white font-black uppercase tracking-[0.4em] text-xs shadow-lg hover:brightness-110">Commit</button>
+              <div className="flex flex-1 gap-4 md:gap-6">
+                  <button onClick={shareNote} className="flex-1 py-5 md:py-6 border-2 font-black uppercase tracking-[0.4em] text-xs flex items-center justify-center gap-2 md:gap-3 hover:border-[#FF7A00]"><Share className="w-4 h-4 md:w-5 md:h-5" /> Share</button>
+                  <button onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirmDelete) {
+                          setEntries(prev => prev.filter(ent => ent.id !== reflectionEntry.id));
+                          setReflectionEntry(null);
+                          setConfirmDelete(false);
+                          notify("Entry deleted.");
+                      } else {
+                          setConfirmDelete(true);
+                          setTimeout(() => setConfirmDelete(false), 3000);
+                      }
+                  }} className={`flex-1 py-5 md:py-6 border-2 font-black uppercase tracking-[0.4em] text-xs flex items-center justify-center gap-2 md:gap-3 transition-all ${confirmDelete ? 'bg-rose-500 text-white border-rose-500' : 'border-rose-500/20 text-rose-500 hover:bg-rose-500 hover:text-white'}`}>
+                      <Trash2 className="w-4 h-4 md:w-5 md:h-5" /> {confirmDelete ? "Confirm?" : "Delete"}
+                  </button>
+              </div>
             </div>
           </div>
         </div>
