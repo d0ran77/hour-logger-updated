@@ -91,15 +91,16 @@ export default function App() {
   const [entries, setEntries] = useState(() => JSON.parse(localStorage.getItem('liam_data') || '[]'));
   const [settings, setSettings] = useState(() => {
     const saved = JSON.parse(localStorage.getItem('liam_set') || '{}');
+    const todayStr = new Date().toISOString().split('T')[0];
     return {
       lang: 'en', isTrainee: false, goal: 0, cpdGoal: 0, globalGoal: 0, superGoal: 0, ratioSuper: 1, ratioClient: 6, trackRatio: true,
       showNomenclature: false, showStartingBalances: false, showKeywords: false,
       startingBalances: { client: 0, super: 0, therapy: 0, cpd: 0 },
       keywords: { client: 'client, session', super: 'supervision', therapy: 'therapy', cpd: 'cpd' },
       labels: { client: '', super: '', therapy: '', cpd: '' },
-      cycleStartDate: `${new Date().getFullYear()}-09-01`, 
+      cycleStartDate: todayStr, 
       enableGlobalStart: false,
-      globalStartDate: `${new Date().getFullYear()}-09-01`, 
+      globalStartDate: todayStr, 
       ...saved
     };
   });
@@ -170,7 +171,7 @@ export default function App() {
   const displayedEntries = useMemo(() => {
     const now = new Date();
     const moStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const cycleStart = new Date(settings.cycleStartDate || `${now.getFullYear()}-09-01`); 
+    const cycleStart = new Date(settings.cycleStartDate || now.toISOString().split('T')[0]); 
     const globalStart = (settings.enableGlobalStart && settings.globalStartDate) ? new Date(settings.globalStartDate) : null;
     
     return entries.filter(e => {
@@ -223,15 +224,16 @@ export default function App() {
 
   const handleResetParams = () => {
     if (resetConfirm) {
+      const todayStr = new Date().toISOString().split('T')[0];
       setSettings({
         lang: 'en', isTrainee: false, goal: 0, cpdGoal: 0, globalGoal: 0, superGoal: 0, ratioSuper: 1, ratioClient: 6, trackRatio: true,
         showNomenclature: false, showStartingBalances: false, showKeywords: false,
         startingBalances: { client: 0, super: 0, therapy: 0, cpd: 0 },
         keywords: { client: 'client, session', super: 'supervision', therapy: 'therapy', cpd: 'cpd' },
         labels: { client: '', super: '', therapy: '', cpd: '' },
-        cycleStartDate: `${new Date().getFullYear()}-09-01`,
+        cycleStartDate: todayStr,
         enableGlobalStart: false,
-        globalStartDate: `${new Date().getFullYear()}-09-01`
+        globalStartDate: todayStr
       });
       setResetConfirm(false);
       notify("Parameters reset.");
@@ -269,11 +271,18 @@ export default function App() {
   const fetchCalendarEvents = async (accessToken) => {
     try {
       const now = new Date();
-      const syncStartDateStr = (settings.enableGlobalStart && settings.globalStartDate) ? settings.globalStartDate : (settings.cycleStartDate || `${now.getFullYear()}-09-01`);
+      // 1. Determine the start date from parameters
+      const syncStartDateStr = (settings.enableGlobalStart && settings.globalStartDate) ? settings.globalStartDate : (settings.cycleStartDate || now.toISOString().split('T')[0]);
       const fetchStart = new Date(syncStartDateStr);
       
+      // 2. Set the end date strictly to NOW (no future events)
+      const fetchEnd = new Date();
+
+      // 3. Fallback: If the cycle start date is in the future, clamp the start date to NOW so the API doesn't crash.
+      const validStart = fetchStart > fetchEnd ? fetchEnd : fetchStart;
+      
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${fetchStart.toISOString()}&timeMax=${now.toISOString()}&maxResults=500&singleEvents=true&orderBy=startTime`,
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${validStart.toISOString()}&timeMax=${fetchEnd.toISOString()}&maxResults=500&singleEvents=true&orderBy=startTime`,
         { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
       );
 
@@ -282,40 +291,61 @@ export default function App() {
 
       let importedCount = 0;
       const newEntries = [];
-      const existingSignatures = new Set(entries.map(e => `${e.date}-${e.hours}-${e.type}`));
+      
+      // Include Title in the signature to allow multiple same-day sessions without them overwriting each other!
+      const existingSignatures = new Set(entries.map(e => `${e.date}-${e.hours}-${e.type}-${(e.title || '').toLowerCase().trim()}`));
 
       data.items?.forEach(event => {
         if (!event.start.dateTime || !event.end.dateTime) return;
         const summary = (event.summary || '').toLowerCase();
         let matchedType = null;
+        
         const checkKeywords = (type) => {
           const keys = (settings.keywords[type] || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
           return keys.some(k => summary.includes(k));
         };
+        
         if (checkKeywords('client')) matchedType = 'client';
         else if (checkKeywords('super')) matchedType = 'super';
         else if (checkKeywords('therapy')) matchedType = 'therapy';
         else if (checkKeywords('cpd')) matchedType = 'cpd';
 
         if (!matchedType) return;
+        
         const start = new Date(event.start.dateTime);
         const end = new Date(event.end.dateTime);
         const hours = parseFloat(((end - start) / (1000 * 60 * 60)).toFixed(1));
         const dateStr = start.toISOString().split('T')[0];
-        const sig = `${dateStr}-${hours}-${matchedType}`;
+        const rawTitle = event.summary || '';
+        
+        // Construct the new robust signature
+        const sig = `${dateStr}-${hours}-${matchedType}-${rawTitle.toLowerCase().trim()}`;
+        
         if (!existingSignatures.has(sig)) {
-          newEntries.push({ id: Date.now() + Math.random(), type: matchedType, date: dateStr, hours: hours, title: event.summary, notes: "" });
+          newEntries.push({ 
+             id: Date.now() + Math.random(), 
+             type: matchedType, 
+             date: dateStr, 
+             hours: hours, 
+             title: rawTitle, 
+             notes: "" 
+          });
           existingSignatures.add(sig);
           importedCount++;
         }
       });
+      
       if (newEntries.length > 0) {
         setEntries(prev => [...newEntries, ...prev]);
         notify(`Imported ${importedCount} sessions to Practisy!`);
       } else {
         notify("No new matching sessions.");
       }
-    } catch (err) { notify(`Sync error: ${err.message}`); } finally { setIsSyncing(false); }
+    } catch (err) { 
+      notify(`Sync error: ${err.message}`); 
+    } finally { 
+      setIsSyncing(false); 
+    }
   };
 
   const handleICal = async (e) => { notify("iCal module awaiting production key."); };
