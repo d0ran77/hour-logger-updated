@@ -771,10 +771,13 @@ export default function App() {
 
       {/* STANDARD CLEAN FOOTER - REDUCED PADDING */}
       <footer className={`mt-8 pt-6 pb-24 md:pb-20 border-t ${isDark ? 'border-white/5' : 'border-black/10'}`}>
-        <div className="max-w-6xl mx-auto px-6 w-full flex justify-center items-center">
+        <div className="max-w-6xl mx-auto px-6 w-full flex flex-col md:flex-row justify-center items-center gap-6 md:gap-12">
           <div onClick={() => setShowPrivacy(true)} className="flex items-center gap-2 cursor-pointer opacity-50 hover:opacity-100 hover:text-[#FF7A00] transition-colors text-[10px] md:text-xs font-black uppercase tracking-widest">
-            <Shield className="w-4 h-4 md:w-5 md:h-5" /> Privacy & Terms
+            <Download className="w-4 h-4 md:w-5 md:h-5" /> Local Data & Backups
           </div>
+          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 cursor-pointer opacity-50 hover:opacity-100 hover:text-[#FF7A00] transition-colors text-[10px] md:text-xs font-black uppercase tracking-widest">
+            <Shield className="w-4 h-4 md:w-5 md:h-5" /> Legal Privacy & Terms
+          </a>
         </div>
       </footer>
 
@@ -868,26 +871,26 @@ export default function App() {
         </div>
       )}
 
-      {/* PRIVACY, POLICY & LEGAL MODAL */}
+      {/* LOCAL DATA MANAGEMENT MODAL */}
       {showPrivacy && (
         <div className="fixed inset-0 bg-[#121212]/95 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowPrivacy(false)}>
           <div className={`p-10 md:p-14 rounded-sm shadow-2xl max-w-2xl w-full relative border flex flex-col max-h-[90vh] ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/5'}`} onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-10 shrink-0">
-              <h3 className="text-lg font-black uppercase tracking-[0.4em] flex items-center gap-4 text-[#FF7A00]"><Shield className="w-6 h-6" /> Privacy, Policy & Legal</h3>
+              <h3 className="text-lg font-black uppercase tracking-[0.4em] flex items-center gap-4 text-[#FF7A00]"><Download className="w-6 h-6" /> Local Data Management</h3>
               <X onClick={() => setShowPrivacy(false)} className="w-7 h-7 cursor-pointer opacity-40 hover:opacity-100" />
             </div>
             <div className="space-y-8 mb-10 text-sm opacity-80 leading-relaxed overflow-y-auto custom-scroll pr-6">
               <div>
-                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Privacy & Local-First Protocol</strong>
-                <p>Practisy is built with a 'Local-First' architecture. Every clinical hour, reflection note, and preference is stored exclusively in your browser's local storage. We do not have a database and cannot access your data. Sync Engine requests temporary, read-only access to your calendar. This handshake happens directly between your browser and Google. No data is ever sent to third parties.</p>
+                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">The Local-First Architecture</strong>
+                <p>Practisy has no cloud database. Every clinical hour, reflection note, and parameter you set is stored exclusively inside this specific browser on this specific device.</p>
               </div>
               <div>
-                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Terms of Service & Policy</strong>
-                <p>By using Practisy, you agree to take full responsibility for the data entered. As a strictly local-first application, we do not monitor, recover, or manage your data. It is highly recommended to maintain regular JSON backups.</p>
+                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Routine Backups Required</strong>
+                <p>Because your data is strictly local to protect client privacy, <strong>you are solely responsible for backing it up</strong>. If you clear your browser's site data, switch to a new laptop, or experience hardware failure, you will need a <code>.json</code> backup file to restore your clinical log.</p>
               </div>
               <div>
-                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Legal Disclaimer</strong>
-                <p>Practisy provides tracking utilities "as is" without warranty. You remain solely responsible for your professional ethics. We strongly advise using pseudonyms (e.g., 'Client A') in your notes to maintain absolute anonymity in accordance with professional body guidelines (e.g., BACP, UKCP, APA).</p>
+                <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Restoring Your Data</strong>
+                <p>To move your data to a new device or recover a previous state, use the "Manual Backup" button below to download your secure <code>.json</code> file, then use "Restore Data" on your target device to import it.</p>
               </div>
             </div>
             <div className="shrink-0 space-y-4">
