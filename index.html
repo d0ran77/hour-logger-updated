@@ -4,10 +4,45 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>clinical-log</title>
+    
+    <!-- SEO Meta Tags -->
+    <title>Practisy | Privacy-First Clinical Hour Automation</title>
+    <meta name="description" content="Automate your clinical logging. Practisy syncs your Google Calendar therapy sessions and tracks professional compliance ratios automatically.">
+    <meta name="keywords" content="clinical log, therapy hour tracker, UKCP ratio, BACP log, practitioner admin, Google calendar sync">
+
+    <!-- Schema.org JSON-LD: This tells Google exactly what the app is -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Practisy",
+      "url": "https://practisy.app", 
+      "description": "A privacy-first automation tool for practitioners to sync Google Calendar therapy sessions and track clinical compliance ratios.",
+      "applicationCategory": "BusinessApplication, MedicalApplication",
+      "operatingSystem": "All",
+      "author": {
+        "@type": "Person",
+        "name": "Liam",
+        "url": "https://practisy.app"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0.00",
+        "priceCurrency": "GBP"
+      },
+      "featureList": [
+        "Google Calendar Sync Engine",
+        "Clinical Compliance Ratio Tracking",
+        "Local-First Data Privacy",
+        "JSON Backup & Restore",
+        "BACP/UKCP Cycle Support"
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <!-- This links to your React logic -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
