@@ -117,7 +117,7 @@ export default function App() {
   const [showCookies, setShowCookies] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Custom Two-Tap Confirmation States (Bypasses iframe alert blocks)
+  // Custom Two-Tap Confirmation States
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
 
@@ -271,14 +271,10 @@ export default function App() {
   const fetchCalendarEvents = async (accessToken) => {
     try {
       const now = new Date();
-      // 1. Determine the start date from parameters
       const syncStartDateStr = (settings.enableGlobalStart && settings.globalStartDate) ? settings.globalStartDate : (settings.cycleStartDate || now.toISOString().split('T')[0]);
       const fetchStart = new Date(syncStartDateStr);
       
-      // 2. Set the end date strictly to NOW (no future events)
       const fetchEnd = new Date();
-
-      // 3. Fallback: If the cycle start date is in the future, clamp the start date to NOW so the API doesn't crash.
       const validStart = fetchStart > fetchEnd ? fetchEnd : fetchStart;
       
       const response = await fetch(
@@ -291,12 +287,41 @@ export default function App() {
 
       let importedCount = 0;
       const newEntries = [];
+
+      // --- SMARTER DEDUPLICATION ENGINE ---
+      // 1. Collect all the Google Event IDs we have EVER successfully synced.
+      const existingSyncIds = new Set(entries.filter(e => e.syncId).map(e => e.syncId));
+
+      // 2. Build a "Token Tracker" for legacy data and manual entries.
+      // This prevents duplicating events that were synced *before* we had IDs, or events you manually typed.
+      const existingTracker = {};
       
-      // Include Title in the signature to allow multiple same-day sessions without them overwriting each other!
-      const existingSignatures = new Set(entries.map(e => `${e.date}-${e.hours}-${e.type}-${(e.title || '').toLowerCase().trim()}`));
+      entries.forEach(e => {
+         if (e.syncId) return; // Skip entries that already have a rock-solid Google ID
+         
+         const eTitle = (e.title || '').toLowerCase().trim();
+         const eNotes = (e.notes || '').toLowerCase().trim();
+         
+         const exactSig = `${e.date}-${e.hours}-${e.type}-${eTitle}`;
+         existingTracker[exactSig] = (existingTracker[exactSig] || 0) + 1;
+         
+         if (eTitle === '' && eNotes.includes('synced')) {
+             const legacySig = `${e.date}-${e.hours}-${e.type}-LEGACY`;
+             existingTracker[legacySig] = (existingTracker[legacySig] || 0) + 1;
+         }
+         
+         if (eTitle === '' && !eNotes.includes('synced')) {
+             const manualSig = `${e.date}-${e.hours}-${e.type}-MANUAL`;
+             existingTracker[manualSig] = (existingTracker[manualSig] || 0) + 1;
+         }
+      });
 
       data.items?.forEach(event => {
         if (!event.start.dateTime || !event.end.dateTime) return;
+        
+        // Safety Check 1: Have we already synced this specific Google Event?
+        if (existingSyncIds.has(event.id)) return;
+
         const summary = (event.summary || '').toLowerCase();
         let matchedType = null;
         
@@ -317,22 +342,28 @@ export default function App() {
         const hours = parseFloat(((end - start) / (1000 * 60 * 60)).toFixed(1));
         const dateStr = start.toISOString().split('T')[0];
         const rawTitle = event.summary || '';
+        const cleanTitle = rawTitle.toLowerCase().trim();
         
-        // Construct the new robust signature
-        const sig = `${dateStr}-${hours}-${matchedType}-${rawTitle.toLowerCase().trim()}`;
-        
-        if (!existingSignatures.has(sig)) {
-          newEntries.push({ 
-             id: Date.now() + Math.random(), 
-             type: matchedType, 
-             date: dateStr, 
-             hours: hours, 
-             title: rawTitle, 
-             notes: "" 
-          });
-          existingSignatures.add(sig);
-          importedCount++;
-        }
+        // Safety Check 2: Fallback tracking for legacy/manual entries
+        const exactSig = `${dateStr}-${hours}-${matchedType}-${cleanTitle}`;
+        const manualSig = `${dateStr}-${hours}-${matchedType}-MANUAL`;
+        const legacySig = `${dateStr}-${hours}-${matchedType}-LEGACY`;
+
+        if (existingTracker[exactSig] > 0) { existingTracker[exactSig]--; return; } // Consumes exact old match
+        if (existingTracker[manualSig] > 0) { existingTracker[manualSig]--; return; } // Absorbs a manual entry
+        if (existingTracker[legacySig] > 0) { existingTracker[legacySig]--; return; } // Consumes a legacy note match
+
+        // Pass all checks! Import as a brand new unique event.
+        newEntries.push({ 
+           id: Date.now() + Math.random(), 
+           syncId: event.id, // Save the Google ID forever
+           type: matchedType, 
+           date: dateStr, 
+           hours: hours, 
+           title: rawTitle, 
+           notes: "" 
+        });
+        importedCount++;
       });
       
       if (newEntries.length > 0) {
