@@ -284,7 +284,7 @@ export default function App() {
     return entries
       .filter(e => e.nextSessionNote && e.nextSessionNote.trim() !== '')
       .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 6); // Show top 6 most recent preps in a 3x3 layout
+      .slice(0, 6); // Show top 6 most recent preps
   }, [entries]);
 
   // --- ACTIONS ---
@@ -642,6 +642,42 @@ export default function App() {
     );
   };
 
+  const renderClinicalInsights = (isMobile) => (
+    <div className={`${isMobile ? 'block lg:hidden p-6' : 'hidden lg:block p-6 md:p-10'} rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
+       <button onClick={() => setOpenAccordion(openAccordion === 'insights' ? null : 'insights')} className="flex justify-between md:justify-start items-center gap-3 group w-full outline-none">
+          <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3 transition-all">
+            <TrendingUp className="w-5 h-5 text-[#FF7A00]" /> Clinical Insights
+          </h3>
+          <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'insights' ? '' : 'rotate-180'}`} />
+       </button>
+       
+       {openAccordion === 'insights' && (
+          <div className="mt-8 animate-in fade-in slide-in-from-top-2">
+             {tagInsights.sorted.length === 0 ? (
+                <p className="py-8 text-center opacity-30 text-sm font-black tracking-widest uppercase">No tags used in active view.</p>
+             ) : (
+                <div className="space-y-5">
+                   {tagInsights.sorted.map(([tag, count]) => {
+                      const percentage = Math.round((count / Math.max(1, tagInsights.totalSessions)) * 100);
+                      return (
+                         <div key={tag}>
+                            <div className="flex justify-between text-[10px] md:text-xs font-black uppercase tracking-widest mb-1.5 opacity-70">
+                               <button onClick={() => setActiveTagFilter(tag)} className="hover:text-[#FF7A00] transition-colors">{tag}</button>
+                               <span>{count} sessions <span className="opacity-50 ml-1">({percentage}%)</span></span>
+                            </div>
+                            <div className="h-1.5 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                               <div style={{width: `${percentage}%`}} className="h-full bg-[#FF7A00] transition-all duration-1000" />
+                            </div>
+                         </div>
+                      )
+                   })}
+                </div>
+             )}
+          </div>
+       )}
+    </div>
+  );
+
   const handleDismissWelcome = () => {
     localStorage.setItem('liam_has_seen_welcome', 'true');
     setShowWelcome(false);
@@ -678,7 +714,7 @@ export default function App() {
           {renderBucket(labels.cpd, totals.cpd, 'cpdGoal')}
         </div>
 
-        {/* ACTIVE RECORDS (FULL WIDTH, TAG FILTERING) */}
+        {/* ACTIVE RECORDS (FULL WIDTH, MOVED DIRECTLY UNDER BUCKETS) */}
         <div className={`mb-12 p-6 md:p-10 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
           <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
             <div className="flex flex-col items-start text-left w-full">
@@ -689,7 +725,7 @@ export default function App() {
                 <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'records' ? '' : 'rotate-180'}`} />
               </button>
               <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#FF7A00] opacity-80 mt-3 flex items-center gap-2">
-                <BookOpen className="w-3 h-3" /> Tap any record below to manage session notes and tags
+                <BookOpen className="w-3 h-3 shrink-0" /> Tap a record to manage notes & tags
               </p>
               
               {/* Active Filter UI */}
@@ -775,9 +811,9 @@ export default function App() {
         </div>
 
         {/* GRID LAYOUT (FOR SIDEBAR AND PARAMETERS) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 md:gap-20">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 md:gap-20">
           
-          <aside className={`lg:col-span-4 flex flex-col gap-8 border-r pr-0 lg:pr-10 ${isDark ? 'border-white/5' : 'border-black/10'}`}>
+          <aside className={`lg:col-span-4 flex flex-col gap-8 border-r-0 lg:border-r pr-0 lg:pr-10 ${isDark ? 'border-white/5' : 'border-black/10'}`}>
             
             {/* 1. NEW ENTRY */}
             <div className={`p-6 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
@@ -801,6 +837,9 @@ export default function App() {
                 </form>
               )}
             </div>
+
+            {/* CLINICAL INSIGHTS (MOBILE ONLY - Displayed underneath New Entry) */}
+            {renderClinicalInsights(true)}
 
             {/* 2. COMPLIANCE STATUS */}
             {settings.trackRatio && (
@@ -919,44 +958,8 @@ export default function App() {
               </div>
             )}
 
-            {/* CLINICAL INSIGHTS DASHBOARD */}
-            <div className={`p-6 md:p-10 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
-               <button onClick={() => setOpenAccordion(openAccordion === 'insights' ? null : 'insights')} className="flex justify-between md:justify-start items-center gap-3 group w-full outline-none">
-                  <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center transition-all">
-                    Clinical Insights
-                  </h3>
-                  <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'insights' ? '' : 'rotate-180'}`} />
-               </button>
-               
-               {openAccordion === 'insights' && (
-                  <div className="mt-8 animate-in fade-in slide-in-from-top-2">
-                     <div className="flex items-center gap-3 mb-6 opacity-80">
-                        <TrendingUp className="w-5 h-5 text-[#FF7A00]" />
-                        <p className="text-xs font-bold uppercase tracking-widest text-[#FF7A00]">Top Session Themes</p>
-                     </div>
-                     {tagInsights.sorted.length === 0 ? (
-                        <p className="py-8 text-center opacity-30 text-sm font-black tracking-widest uppercase">No tags used in active view.</p>
-                     ) : (
-                        <div className="space-y-5">
-                           {tagInsights.sorted.map(([tag, count]) => {
-                              const percentage = Math.round((count / Math.max(1, tagInsights.totalSessions)) * 100);
-                              return (
-                                 <div key={tag}>
-                                    <div className="flex justify-between text-[10px] md:text-xs font-black uppercase tracking-widest mb-1.5 opacity-70">
-                                       <button onClick={() => setActiveTagFilter(tag)} className="hover:text-[#FF7A00] transition-colors">{tag}</button>
-                                       <span>{count} sessions <span className="opacity-50 ml-1">({percentage}%)</span></span>
-                                    </div>
-                                    <div className="h-1.5 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-                                       <div style={{width: `${percentage}%`}} className="h-full bg-[#FF7A00] transition-all duration-1000" />
-                                    </div>
-                                 </div>
-                              )
-                           })}
-                        </div>
-                     )}
-                  </div>
-               )}
-            </div>
+            {/* CLINICAL INSIGHTS (DESKTOP ONLY - Displayed in wide right column) */}
+            {renderClinicalInsights(false)}
 
             {/* PARAMETERS (Wide View) */}
             <div className={`p-6 md:p-10 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
@@ -1399,8 +1402,8 @@ export default function App() {
             {/* Tags & Tools Toolbar - Hidden in Focus Mode */}
             {!isFocusMode && (
               <div className="flex flex-col md:flex-row md:items-start gap-4 mb-6 shrink-0 relative">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Tag className="w-4 h-4 text-[#FF7A00] opacity-60 mr-1" />
+                <div className="flex flex-wrap items-center gap-2 w-full">
+                  <Tag className="w-4 h-4 text-[#FF7A00] opacity-60 mr-1 hidden md:block" />
                   
                   {/* Selected Tag Pills */}
                   {reflectionEntry.tags?.map(tag => (
@@ -1409,7 +1412,7 @@ export default function App() {
                      </span>
                   ))}
                   
-                  {/* Add Tag Button */}
+                  {/* Add Tag Dropdown / Bottom Sheet */}
                   <div className="relative">
                     <button 
                       onClick={() => { setShowTagMenu(!showTagMenu); setShowTemplateMenu(false); setShowMetricMenu(false); }} 
@@ -1418,31 +1421,34 @@ export default function App() {
                       + Add Tag
                     </button>
 
-                    {/* Popover Tag Menu */}
                     {showTagMenu && (
-                      <div className="absolute top-full left-0 mt-3 w-[280px] md:w-80 bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-50 p-5 animate-in fade-in slide-in-from-top-2">
-                         <div className="flex justify-between items-center mb-4">
-                            <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Tags</span>
-                            <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTagMenu(false)} />
-                         </div>
-                         <div className="flex flex-wrap gap-2">
-                            {availableTags.map(tag => {
-                               const isSelected = (reflectionEntry.tags || []).includes(tag);
-                               return (
-                                 <button key={tag} onClick={() => {
-                                    const currentTags = reflectionEntry.tags || [];
-                                    updateReflection({ tags: isSelected ? currentTags.filter(t => t !== tag) : [...currentTags, tag] });
-                                 }} className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isSelected ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}>
-                                    {tag}
-                                 </button>
-                               );
-                            })}
-                         </div>
-                      </div>
+                      <>
+                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowTagMenu(false)}></div>
+                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:left-0 md:mt-3 md:w-80 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                           <div className="flex justify-between items-center mb-4">
+                              <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Tags</span>
+                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTagMenu(false)} />
+                           </div>
+                           <div className="flex flex-wrap gap-2">
+                              {availableTags.map(tag => {
+                                 const isSelected = (reflectionEntry.tags || []).includes(tag);
+                                 return (
+                                   <button key={tag} onClick={() => {
+                                      const currentTags = reflectionEntry.tags || [];
+                                      updateReflection({ tags: isSelected ? currentTags.filter(t => t !== tag) : [...currentTags, tag] });
+                                   }} className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isSelected ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}>
+                                      {tag}
+                                   </button>
+                                 );
+                              })}
+                           </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
-                  <div className="relative border-l pl-2 border-black/10 dark:border-white/10">
+                  {/* Add Template Dropdown / Bottom Sheet */}
+                  <div className="relative md:border-l md:pl-2 md:border-black/10 md:dark:border-white/10">
                     <button 
                       onClick={() => { setShowTemplateMenu(!showTemplateMenu); setShowTagMenu(false); setShowMetricMenu(false); }} 
                       className="px-3 py-1 border border-dashed border-black/30 dark:border-white/30 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest opacity-60 hover:opacity-100 hover:border-[#FF7A00] hover:text-[#FF7A00] transition-colors"
@@ -1450,29 +1456,32 @@ export default function App() {
                       + Add Template
                     </button>
 
-                    {/* Popover Template Menu */}
                     {showTemplateMenu && (
-                      <div className="absolute top-full left-0 mt-3 w-[260px] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-50 p-5 animate-in fade-in slide-in-from-top-2">
-                         <div className="flex justify-between items-center mb-4">
-                            <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Framework</span>
-                            <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTemplateMenu(false)} />
-                         </div>
-                         <div className="flex flex-wrap gap-2">
-                            {Object.keys(TEMPLATES).map(tpl => (
-                               <button 
-                                  key={tpl} 
-                                  onClick={() => { applyText(TEMPLATES[tpl]); setShowTemplateMenu(false); }} 
-                                  className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(TEMPLATES[tpl]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
-                               >
-                                  {tpl === 'SIX' ? '6-CAT' : tpl}
-                               </button>
-                            ))}
-                         </div>
-                      </div>
+                      <>
+                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowTemplateMenu(false)}></div>
+                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:left-0 md:mt-3 md:w-72 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                           <div className="flex justify-between items-center mb-4">
+                              <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Framework</span>
+                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTemplateMenu(false)} />
+                           </div>
+                           <div className="flex flex-wrap gap-2">
+                              {Object.keys(TEMPLATES).map(tpl => (
+                                 <button 
+                                    key={tpl} 
+                                    onClick={() => { applyText(TEMPLATES[tpl]); setShowTemplateMenu(false); }} 
+                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(TEMPLATES[tpl]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
+                                 >
+                                    {tpl === 'SIX' ? '6-CAT' : tpl}
+                                 </button>
+                              ))}
+                           </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
-                  <div className="relative border-l pl-2 border-black/10 dark:border-white/10">
+                  {/* Add Metric Dropdown / Bottom Sheet */}
+                  <div className="relative md:border-l md:pl-2 md:border-black/10 md:dark:border-white/10">
                     <button 
                       onClick={() => { setShowMetricMenu(!showMetricMenu); setShowTagMenu(false); setShowTemplateMenu(false); }} 
                       className="px-3 py-1 border border-dashed border-black/30 dark:border-white/30 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest opacity-60 hover:opacity-100 hover:border-[#FF7A00] hover:text-[#FF7A00] transition-colors"
@@ -1480,25 +1489,27 @@ export default function App() {
                       + Add Metric
                     </button>
 
-                    {/* Popover Metric Menu */}
                     {showMetricMenu && (
-                      <div className="absolute top-full left-0 mt-3 w-[260px] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-50 p-5 animate-in fade-in slide-in-from-top-2">
-                         <div className="flex justify-between items-center mb-4">
-                            <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Measure</span>
-                            <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowMetricMenu(false)} />
-                         </div>
-                         <div className="flex flex-wrap gap-2">
-                            {Object.keys(METRICS).map(m => (
-                               <button 
-                                  key={m} 
-                                  onClick={() => { applyText(METRICS[m]); setShowMetricMenu(false); }} 
-                                  className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(METRICS[m]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
-                               >
-                                  {m}
-                               </button>
-                            ))}
-                         </div>
-                      </div>
+                      <>
+                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowMetricMenu(false)}></div>
+                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:right-0 md:left-auto md:mt-3 md:w-72 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                           <div className="flex justify-between items-center mb-4">
+                              <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Measure</span>
+                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowMetricMenu(false)} />
+                           </div>
+                           <div className="flex flex-wrap gap-2">
+                              {Object.keys(METRICS).map(m => (
+                                 <button 
+                                    key={m} 
+                                    onClick={() => { applyText(METRICS[m]); setShowMetricMenu(false); }} 
+                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(METRICS[m]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
+                                 >
+                                    {m}
+                                 </button>
+                              ))}
+                           </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
