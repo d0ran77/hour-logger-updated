@@ -171,7 +171,6 @@ export default function App() {
   // Custom Two-Tap Confirmation States
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
-  const [confirmClearPrep, setConfirmClearPrep] = useState(false);
 
   const isDark = theme === 'dark';
   const inputColorClass = isDark 
@@ -905,33 +904,15 @@ export default function App() {
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#FF7A00] to-transparent opacity-50"></div>
                 
                 <div className="flex justify-between items-center w-full">
-                   <button onClick={() => setOpenAccordion(openAccordion === 'briefing' ? null : 'briefing')} className="flex items-center gap-3 group outline-none">
-                     <Lightbulb className="w-5 h-5 text-[#FF7A00]" />
-                     <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] text-[#FF7A00]">
-                       Session Briefing
-                     </h3>
+                   <button onClick={() => setOpenAccordion(openAccordion === 'briefing' ? null : 'briefing')} className="flex justify-between items-center w-full group outline-none">
+                     <div className="flex items-center gap-3">
+                       <Lightbulb className="w-5 h-5 text-[#FF7A00]" />
+                       <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] text-[#FF7A00]">
+                         Session Briefing
+                       </h3>
+                     </div>
                      <ChevronUp className={`w-5 h-5 text-[#FF7A00] transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'briefing' ? '' : 'rotate-180'}`} />
                    </button>
-
-                   {openAccordion === 'briefing' && (
-                     <button 
-                        onClick={(e) => {
-                           e.stopPropagation();
-                           if (confirmClearPrep) {
-                              setEntries(prev => prev.map(ent => ({...ent, nextSessionNote: ""})));
-                              setConfirmClearPrep(false);
-                              notify("All prep notes erased.");
-                              setOpenAccordion(null); 
-                           } else {
-                              setConfirmClearPrep(true);
-                              setTimeout(() => setConfirmClearPrep(false), 4000);
-                           }
-                        }}
-                        className={`flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all border ${confirmClearPrep ? 'bg-rose-500 text-white border-rose-500 shadow-md' : 'border-black/10 dark:border-white/10 text-gray-500 hover:bg-rose-500/10 hover:text-rose-500 hover:border-rose-500/30'}`}
-                     >
-                        <Trash2 className="w-3.5 h-3.5" /> <span className="hidden md:inline">{confirmClearPrep ? "Confirm Clear?" : "Clear"}</span>
-                     </button>
-                   )}
                 </div>
                 
                 {openAccordion === 'briefing' && (
@@ -947,7 +928,15 @@ export default function App() {
                              {e.title && <p className="text-[9px] font-black uppercase tracking-widest opacity-70 truncate mb-1">{e.title}</p>}
                              <p className="text-xs md:text-sm font-bold opacity-90 italic truncate">"{e.nextSessionNote}"</p>
                            </div>
-                           <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-2">
+                              <button onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  setEntries(prev => prev.map(ent => ent.id === e.id ? {...ent, nextSessionNote: ""} : ent));
+                                  notify("Prep note cleared.");
+                                  if (prepNotes.length === 1) setOpenAccordion(null); 
+                              }} className="text-gray-400 hover:text-rose-500 transition-colors p-1" title="Clear Note">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                               <BookOpen className="w-4 h-4 text-[#FF7A00]" />
                            </div>
                          </div>
@@ -1412,7 +1401,7 @@ export default function App() {
                      </span>
                   ))}
                   
-                  {/* Add Tag Dropdown / Bottom Sheet */}
+                  {/* Add Tag Dropdown */}
                   <div className="relative">
                     <button 
                       onClick={() => { setShowTagMenu(!showTagMenu); setShowTemplateMenu(false); setShowMetricMenu(false); }} 
@@ -1423,11 +1412,11 @@ export default function App() {
 
                     {showTagMenu && (
                       <>
-                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowTagMenu(false)}></div>
-                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:left-0 md:mt-3 md:w-80 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                        <div className="fixed inset-0 z-[105]" onClick={() => setShowTagMenu(false)}></div>
+                        <div className="absolute top-full left-0 mt-3 w-[280px] max-w-[85vw] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-[110] p-4 md:p-5 animate-in fade-in slide-in-from-top-2">
                            <div className="flex justify-between items-center mb-4">
                               <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Tags</span>
-                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTagMenu(false)} />
+                              <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTagMenu(false)} />
                            </div>
                            <div className="flex flex-wrap gap-2">
                               {availableTags.map(tag => {
@@ -1436,7 +1425,7 @@ export default function App() {
                                    <button key={tag} onClick={() => {
                                       const currentTags = reflectionEntry.tags || [];
                                       updateReflection({ tags: isSelected ? currentTags.filter(t => t !== tag) : [...currentTags, tag] });
-                                   }} className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isSelected ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}>
+                                   }} className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all bg-[#FF7A00] text-white ${isSelected ? 'ring-2 ring-offset-2 ring-[#FF7A00] dark:ring-offset-[#1c1c1c] shadow-lg opacity-100' : 'opacity-70 hover:opacity-100 shadow-sm'}`}>
                                       {tag}
                                    </button>
                                  );
@@ -1447,7 +1436,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Add Template Dropdown / Bottom Sheet */}
+                  {/* Add Template Dropdown */}
                   <div className="relative md:border-l md:pl-2 md:border-black/10 md:dark:border-white/10">
                     <button 
                       onClick={() => { setShowTemplateMenu(!showTemplateMenu); setShowTagMenu(false); setShowMetricMenu(false); }} 
@@ -1458,18 +1447,18 @@ export default function App() {
 
                     {showTemplateMenu && (
                       <>
-                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowTemplateMenu(false)}></div>
-                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:left-0 md:mt-3 md:w-72 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                        <div className="fixed inset-0 z-[105]" onClick={() => setShowTemplateMenu(false)}></div>
+                        <div className="absolute top-full left-0 mt-3 w-[260px] max-w-[85vw] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-[110] p-4 md:p-5 animate-in fade-in slide-in-from-top-2">
                            <div className="flex justify-between items-center mb-4">
                               <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Framework</span>
-                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTemplateMenu(false)} />
+                              <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowTemplateMenu(false)} />
                            </div>
                            <div className="flex flex-wrap gap-2">
                               {Object.keys(TEMPLATES).map(tpl => (
                                  <button 
                                     key={tpl} 
                                     onClick={() => { applyText(TEMPLATES[tpl]); setShowTemplateMenu(false); }} 
-                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(TEMPLATES[tpl]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
+                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all bg-[#FF7A00] text-white ${isTextActive(TEMPLATES[tpl]) ? 'ring-2 ring-offset-2 ring-[#FF7A00] dark:ring-offset-[#1c1c1c] shadow-lg opacity-100' : 'opacity-70 hover:opacity-100 shadow-sm'}`}
                                  >
                                     {tpl === 'SIX' ? '6-CAT' : tpl}
                                  </button>
@@ -1480,7 +1469,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Add Metric Dropdown / Bottom Sheet */}
+                  {/* Add Metric Dropdown */}
                   <div className="relative md:border-l md:pl-2 md:border-black/10 md:dark:border-white/10">
                     <button 
                       onClick={() => { setShowMetricMenu(!showMetricMenu); setShowTagMenu(false); setShowTemplateMenu(false); }} 
@@ -1491,18 +1480,18 @@ export default function App() {
 
                     {showMetricMenu && (
                       <>
-                        <div className="fixed inset-0 z-[105] bg-black/20 dark:bg-black/60 md:hidden" onClick={() => setShowMetricMenu(false)}></div>
-                        <div className="fixed inset-x-0 bottom-0 z-[110] bg-white dark:bg-[#1c1c1c] rounded-t-2xl p-6 pb-10 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] border-t border-black/10 dark:border-white/10 animate-in slide-in-from-bottom-10 md:absolute md:inset-auto md:top-full md:right-0 md:left-auto md:mt-3 md:w-72 md:rounded-md md:border md:p-5 md:pb-5 md:shadow-2xl md:slide-in-from-top-2">
+                        <div className="fixed inset-0 z-[105]" onClick={() => setShowMetricMenu(false)}></div>
+                        <div className="absolute top-full right-0 md:left-0 mt-3 w-[260px] max-w-[85vw] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-[110] p-4 md:p-5 animate-in fade-in slide-in-from-top-2">
                            <div className="flex justify-between items-center mb-4">
                               <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Measure</span>
-                              <X className="w-5 h-5 md:w-4 md:h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowMetricMenu(false)} />
+                              <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowMetricMenu(false)} />
                            </div>
                            <div className="flex flex-wrap gap-2">
                               {Object.keys(METRICS).map(m => (
                                  <button 
                                     key={m} 
                                     onClick={() => { applyText(METRICS[m]); setShowMetricMenu(false); }} 
-                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all ${isTextActive(METRICS[m]) ? 'bg-[#FF7A00] text-white shadow-md' : 'bg-black/5 dark:bg-white/5 hover:bg-[#FF7A00]/20 hover:text-[#FF7A00]'}`}
+                                    className={`px-2.5 py-1.5 text-[9px] md:text-[10px] font-black uppercase tracking-widest rounded-sm transition-all bg-[#FF7A00] text-white ${isTextActive(METRICS[m]) ? 'ring-2 ring-offset-2 ring-[#FF7A00] dark:ring-offset-[#1c1c1c] shadow-lg opacity-100' : 'opacity-70 hover:opacity-100 shadow-sm'}`}
                                  >
                                     {m}
                                  </button>
