@@ -11,6 +11,21 @@ import {
 // ============================================================================
 const GOOGLE_CLIENT_ID = '1096186568274-ba5t2npnha0gt0latstffcejbcfgfgiv.apps.googleusercontent.com';
 
+const GOOGLE_COLORS = [
+  { id: '11', name: 'Tomato', hex: '#d50000' },
+  { id: '1', name: 'Lavender', hex: '#7986cb' },
+  { id: '5', name: 'Banana', hex: '#f6bf26' },
+  { id: '3', name: 'Grape', hex: '#8e24aa' },
+  { id: '2', name: 'Sage', hex: '#33b679' },
+  { id: '4', name: 'Flamingo', hex: '#e67c73' },
+  { id: '6', name: 'Tangerine', hex: '#f5511d' },
+  { id: '7', name: 'Peacock', hex: '#039be5' },
+  { id: '8', name: 'Graphite', hex: '#616161' },
+  { id: '9', name: 'Blueberry', hex: '#3f51b5' },
+  { id: '10', name: 'Basil', hex: '#0b8043' },
+  { id: '', name: 'None (Ignore Color)', hex: 'transparent' }
+];
+
 const i18n = {
   en: { 
     brand: "Built By Liam", title_part1: "Pract", title_part2: "isy.", 
@@ -101,13 +116,16 @@ export default function App() {
       cycleStartDate: todayStr, 
       enableGlobalStart: false,
       globalStartDate: todayStr, 
+      enableKeywords: true,
+      enableColors: false,
+      colors: { client: '11', super: '1', therapy: '3', cpd: '5' },
       ...saved
     };
   });
   
   const [view, setView] = useState('month');
   const [theme, setTheme] = useState(() => localStorage.getItem('liam_theme') || 'dark');
-  const [openAccordion, setOpenAccordion] = useState('records');
+  const [openAccordion, setOpenAccordion] = useState(null);
   const [openSubParam, setOpenSubParam] = useState(null);
   const [reflectionEntry, setReflectionEntry] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -117,12 +135,14 @@ export default function App() {
   const [showCookies, setShowCookies] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // Sync Hub States
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
+  const [lastSynced, setLastSynced] = useState(() => localStorage.getItem('liam_last_sync') || null);
+
   // Custom Two-Tap Confirmation States
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
-
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
 
   const isDark = theme === 'dark';
   const inputColorClass = isDark 
@@ -233,7 +253,10 @@ export default function App() {
         labels: { client: '', super: '', therapy: '', cpd: '' },
         cycleStartDate: todayStr,
         enableGlobalStart: false,
-        globalStartDate: todayStr
+        globalStartDate: todayStr,
+        enableKeywords: true,
+        enableColors: false,
+        colors: { client: '11', super: '1', therapy: '3', cpd: '5' }
       });
       setResetConfirm(false);
       notify("Parameters reset.");
@@ -288,52 +311,55 @@ export default function App() {
       let importedCount = 0;
       const newEntries = [];
 
-      // --- SMARTER DEDUPLICATION ENGINE ---
-      // 1. Collect all the Google Event IDs we have EVER successfully synced.
+      // --- 1. DEDUPLICATION PREP ---
       const existingSyncIds = new Set(entries.filter(e => e.syncId).map(e => e.syncId));
+      const manualTokenBuckets = {};
+      const legacyTokenBuckets = {};
 
-      // 2. Build a "Token Tracker" for legacy data and manual entries.
-      // This prevents duplicating events that were synced *before* we had IDs, or events you manually typed.
-      const existingTracker = {};
-      
       entries.forEach(e => {
-         if (e.syncId) return; // Skip entries that already have a rock-solid Google ID
+         const cleanETitle = (e.title || '').toLowerCase().trim();
+         const cleanENotes = (e.notes || '').toLowerCase().trim();
+         const fullKey = `${e.date}-${e.hours}-${e.type}-${cleanETitle}`;
          
-         const eTitle = (e.title || '').toLowerCase().trim();
-         const eNotes = (e.notes || '').toLowerCase().trim();
-         
-         const exactSig = `${e.date}-${e.hours}-${e.type}-${eTitle}`;
-         existingTracker[exactSig] = (existingTracker[exactSig] || 0) + 1;
-         
-         if (eTitle === '' && eNotes.includes('synced')) {
-             const legacySig = `${e.date}-${e.hours}-${e.type}-LEGACY`;
-             existingTracker[legacySig] = (existingTracker[legacySig] || 0) + 1;
-         }
-         
-         if (eTitle === '' && !eNotes.includes('synced')) {
-             const manualSig = `${e.date}-${e.hours}-${e.type}-MANUAL`;
-             existingTracker[manualSig] = (existingTracker[manualSig] || 0) + 1;
+         if (e.syncId) return;
+         else if (cleanENotes.includes('synced')) {
+             legacyTokenBuckets[fullKey] = (legacyTokenBuckets[fullKey] || 0) + 1;
+         } else {
+             const manualKey = `${e.date}-${e.hours}-${e.type}`;
+             manualTokenBuckets[manualKey] = (manualTokenBuckets[manualKey] || 0) + 1;
          }
       });
 
+      // --- 2. GOOGLE COLOR MAPPING ---
+      const colorToTypeMap = {};
+      if (settings.enableColors) {
+          Object.entries(settings.colors || {}).forEach(([type, colorId]) => {
+              if (colorId) colorToTypeMap[colorId] = type;
+          });
+      }
+
       data.items?.forEach(event => {
         if (!event.start.dateTime || !event.end.dateTime) return;
-        
-        // Safety Check 1: Have we already synced this specific Google Event?
-        if (existingSyncIds.has(event.id)) return;
+        if (existingSyncIds.has(event.id)) return; // Already perfectly synced
 
         const summary = (event.summary || '').toLowerCase();
         let matchedType = null;
         
-        const checkKeywords = (type) => {
-          const keys = (settings.keywords[type] || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
-          return keys.some(k => summary.includes(k));
-        };
-        
-        if (checkKeywords('client')) matchedType = 'client';
-        else if (checkKeywords('super')) matchedType = 'super';
-        else if (checkKeywords('therapy')) matchedType = 'therapy';
-        else if (checkKeywords('cpd')) matchedType = 'cpd';
+        // --- 3. DETECTION LOGIC ---
+        // First, check the Google Event Color (If Enabled)
+        if (settings.enableColors && event.colorId && colorToTypeMap[event.colorId]) {
+            matchedType = colorToTypeMap[event.colorId];
+        } else if (settings.enableKeywords) {
+            // Fallback: Check custom keywords (If Enabled)
+            const checkKeywords = (type) => {
+                const keys = (settings.keywords[type] || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+                return keys.some(k => summary.includes(k));
+            };
+            if (checkKeywords('client')) matchedType = 'client';
+            else if (checkKeywords('super')) matchedType = 'super';
+            else if (checkKeywords('therapy')) matchedType = 'therapy';
+            else if (checkKeywords('cpd')) matchedType = 'cpd';
+        }
 
         if (!matchedType) return;
         
@@ -344,19 +370,16 @@ export default function App() {
         const rawTitle = event.summary || '';
         const cleanTitle = rawTitle.toLowerCase().trim();
         
-        // Safety Check 2: Fallback tracking for legacy/manual entries
-        const exactSig = `${dateStr}-${hours}-${matchedType}-${cleanTitle}`;
-        const manualSig = `${dateStr}-${hours}-${matchedType}-MANUAL`;
-        const legacySig = `${dateStr}-${hours}-${matchedType}-LEGACY`;
+        const fullKey = `${dateStr}-${hours}-${matchedType}-${cleanTitle}`;
+        const manualKey = `${dateStr}-${hours}-${matchedType}`;
 
-        if (existingTracker[exactSig] > 0) { existingTracker[exactSig]--; return; } // Consumes exact old match
-        if (existingTracker[manualSig] > 0) { existingTracker[manualSig]--; return; } // Absorbs a manual entry
-        if (existingTracker[legacySig] > 0) { existingTracker[legacySig]--; return; } // Consumes a legacy note match
+        // --- 4. DEDUPLICATION EXECUTION ---
+        if (legacyTokenBuckets[fullKey] > 0) { legacyTokenBuckets[fullKey]--; return; }
+        if (manualTokenBuckets[manualKey] > 0) { manualTokenBuckets[manualKey]--; return; }
 
-        // Pass all checks! Import as a brand new unique event.
         newEntries.push({ 
            id: Date.now() + Math.random(), 
-           syncId: event.id, // Save the Google ID forever
+           syncId: event.id,
            type: matchedType, 
            date: dateStr, 
            hours: hours, 
@@ -372,6 +395,12 @@ export default function App() {
       } else {
         notify("No new matching sessions.");
       }
+
+      // Record successful sync time
+      const timeStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSynced(timeStamp);
+      localStorage.setItem('liam_last_sync', timeStamp);
+
     } catch (err) { 
       notify(`Sync error: ${err.message}`); 
     } finally { 
@@ -482,7 +511,7 @@ export default function App() {
     <div className={`min-h-screen font-sans transition-colors duration-500 pb-24 ${isDark ? 'bg-[#121212] text-[#e8e7e7]' : 'bg-[#e8e7e7] text-[#121212]'}`} style={{ colorScheme: theme }}>
       <div className="max-w-6xl mx-auto px-6 pt-8 md:pt-20 relative">
         
-        {/* HEADER */}
+        {/* HEADER - RESTORED TO ORIGINAL BRANDING */}
         <header className="mb-12">
           <h2 className="text-base font-black uppercase tracking-[0.6em] opacity-50">{t.brand}</h2>
           <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase italic leading-tight">
@@ -506,53 +535,58 @@ export default function App() {
           {renderBucket(labels.cpd, totals.cpd, 'cpdGoal')}
         </div>
 
-        {/* COMPLIANCE STATUS */}
-        {settings.trackRatio && (
-          <div className="mb-16 space-y-6">
-            <div className="flex justify-between items-end">
-              <div className="space-y-1">
-                <h2 className="text-3xl font-black uppercase italic tracking-tighter">{t.balance_title}</h2>
-                <p className="text-sm font-bold opacity-40 uppercase tracking-[0.3em]">{t.health_label}</p>
-              </div>
-              <div className="text-6xl font-black tabular-nums">{Math.round(ratio)}<span className="text-2xl opacity-40">%</span></div>
-            </div>
-            <div className={`h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-white/10' : 'bg-black/10'}`}>
-              <div style={{ width: `${ratio}%` }} className="h-full bg-[#FF7A00] transition-all duration-1000" />
-            </div>
-            <div className={`p-6 border rounded-sm transition-all ${ratio < 100 ? 'bg-[#FF7A00]/5 border-[#FF7A00]/20' : (isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10')}`}>
-              <p className={`text-base font-bold uppercase tracking-[0.15em] ${ratio < 100 ? 'text-[#FF7A00]' : 'opacity-60'}`}>
-                {totals.client === 0 ? t.awaiting : (ratio < 100 ? t.deficit.replace('{h}', (((totals.client / settings.ratioClient) * settings.ratioSuper) - totals.super).toFixed(1)) : t.verified)}
+        {/* ACTIVE RECORDS (FULL WIDTH, MOVED DIRECTLY UNDER BUCKETS) */}
+        <div className={`mb-12 p-6 md:p-10 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
+          <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+            <div className="flex flex-col items-start text-left w-full">
+              <button onClick={() => setOpenAccordion(openAccordion === 'records' ? null : 'records')} className="flex justify-between md:justify-start items-center gap-3 group w-full outline-none">
+                <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center transition-all">
+                  Active Records
+                </h3>
+                <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'records' ? '' : 'rotate-180'}`} />
+              </button>
+              <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#FF7A00] opacity-80 mt-3 flex items-center gap-2">
+                <BookOpen className="w-3 h-3" /> Tap any record below to manage clinical notes
               </p>
             </div>
+            <div className="flex gap-5 opacity-60 mt-2 md:mt-0">
+              <Table className="w-5 h-5 cursor-pointer hover:text-[#FF7A00] transition-colors" onClick={exportCSV} title="Export CSV" />
+              <Download className="w-5 h-5 cursor-pointer hover:text-[#FF7A00] transition-colors" onClick={exportCSV} title="Download Records" />
+              <Printer className="w-5 h-5 cursor-pointer hover:text-[#FF7A00] transition-colors" onClick={exportPDF} title="Print PDF" />
+            </div>
           </div>
-        )}
+          
+          {openAccordion === 'records' && (
+            <div className="mt-8 space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scroll animate-in fade-in slide-in-from-top-2">
+              {displayedEntries.map(e => (
+                <div key={e.id} onClick={() => setReflectionEntry(e)} className={`flex justify-between items-center p-6 md:p-8 border hover:border-[#FF7A00] transition-all cursor-pointer group rounded-sm shadow-sm ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
+                  <div className="flex items-center gap-6 md:gap-8 flex-1 min-w-0 pr-4 md:pr-8">
+                    <div className={`w-1.5 h-14 shrink-0 ${e.type === 'super' ? 'bg-[#FF7A00]' : (isDark ? 'bg-white/10' : 'bg-black/10')}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm md:text-base font-black uppercase tracking-widest">{labels[e.type]}</p>
+                      {e.title && <p className="text-xs md:text-sm font-bold opacity-80 mt-0.5 truncate">{e.title}</p>}
+                      <p className={`text-xs md:text-sm font-bold ${e.title ? 'opacity-40 mt-1' : 'opacity-50'}`}>{e.date}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 md:gap-8 shrink-0">
+                    {e.notes && e.notes.trim() !== '' && (
+                      <BookOpen className="w-4 h-4 md:w-5 md:h-5 text-[#FF7A00] opacity-60" title="Contains Notes" />
+                    )}
+                    <p className="text-2xl md:text-4xl font-black tabular-nums">{e.hours.toFixed(1)}H</p>
+                  </div>
+                </div>
+              ))}
+              {displayedEntries.length === 0 && <div className="py-24 text-center opacity-30 text-base font-black tracking-widest">NO RECORDS LOGGED</div>}
+            </div>
+          )}
+        </div>
 
+        {/* GRID LAYOUT (FOR SIDEBAR AND PARAMETERS) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 md:gap-20">
           
           <aside className={`lg:col-span-4 flex flex-col gap-8 border-r pr-0 lg:pr-10 ${isDark ? 'border-white/5' : 'border-black/10'}`}>
             
-            {/* SYNC ENGINE */}
-            <div className={`p-6 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
-              <button onClick={() => setOpenAccordion(openAccordion === 'sync' ? null : 'sync')} className="w-full flex justify-between items-center group">
-                <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3">
-                  <RefreshCw className="w-5 h-5 text-[#FF7A00]" /> {t.header_sync}
-                </h3>
-                <ChevronUp className={`w-5 h-5 transition-transform ${openAccordion === 'sync' ? '' : 'rotate-180'}`} />
-              </button>
-              {openAccordion === 'sync' && (
-                <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <button onClick={handleGoogleSync} disabled={isSyncing} className={`w-full py-5 border-2 hover:border-[#FF7A00] font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 disabled:opacity-50 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                    {isSyncing ? <><RefreshCw className="w-5 h-5 animate-spin" /> SYNCING...</> : <><Calendar className="w-5 h-5" /> {t.btn_sync}</>}
-                  </button>
-                  <div className="relative">
-                    <input type="file" accept=".ics" onChange={handleICal} className="absolute inset-0 opacity-0 cursor-pointer" />
-                    <button className={`w-full py-5 border-2 border-dashed hover:border-[#FF7A00] text-sm font-black uppercase tracking-widest ${isDark ? 'border-white/10' : 'border-black/10'}`}>iCal Upload</button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* NEW ENTRY */}
+            {/* 1. NEW ENTRY */}
             <div className={`p-6 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
               <button onClick={() => setOpenAccordion(openAccordion === 'entry' ? null : 'entry')} className="w-full flex justify-between items-center group">
                 <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3">
@@ -562,26 +596,84 @@ export default function App() {
               </button>
               {openAccordion === 'entry' && (
                 <form onSubmit={addEntry} className="mt-8 space-y-6 animate-in fade-in slide-in-from-top-2">
-                  <select name="type" className={`w-full bg-transparent border-b py-2 font-bold outline-none text-base ${isDark ? 'border-white/10 bg-[#1c1c1c]' : 'border-black/10 bg-white'}`}>
-                    <option value="client">{labels.client}</option>
-                    <option value="super">{labels.super}</option>
-                    <option value="therapy">{labels.therapy}</option>
-                    <option value="cpd">{labels.cpd}</option>
+                  <select name="type" className={`w-full bg-transparent border-b py-2 font-bold outline-none text-base ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-[#121212]'}`}>
+                    <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="client">{labels.client}</option>
+                    <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="super">{labels.super}</option>
+                    <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="therapy">{labels.therapy}</option>
+                    <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="cpd">{labels.cpd}</option>
                   </select>
                   <input name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} className={`w-full bg-transparent border-b py-2 text-base font-bold outline-none ${isDark ? 'border-white/10 [color-scheme:dark]' : 'border-black/10'}`} />
                   <input name="hours" type="number" step="0.5" placeholder="Hours" className={`w-full bg-transparent border-b py-2 text-base font-bold outline-none ${isDark ? 'border-white/10 [color-scheme:dark]' : 'border-black/10'}`} />
-                  <button type="submit" className="w-full py-5 bg-[#FF7A00] text-white font-black text-sm uppercase tracking-widest shadow-lg">Add Entry</button>
+                  <button type="submit" className="w-full py-5 bg-[#FF7A00] text-white font-black text-sm uppercase tracking-widest shadow-lg hover:brightness-110 transition-all">Add Entry</button>
                 </form>
               )}
             </div>
 
-            {/* PARAMETERS */}
+            {/* 2. COMPLIANCE STATUS */}
+            {settings.trackRatio && (
+              <div className={`p-6 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
+                <button onClick={() => setOpenAccordion(openAccordion === 'compliance' ? null : 'compliance')} className="w-full flex justify-between items-center group">
+                  <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3 transition-all">
+                    <CheckCircle className="w-5 h-5 text-[#FF7A00]" /> Balance
+                  </h3>
+                  <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'compliance' ? '' : 'rotate-180'}`} />
+                </button>
+                
+                {openAccordion === 'compliance' && (
+                  <div className="mt-8 space-y-6 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex justify-between items-end">
+                      <div className="space-y-1">
+                        <p className="text-[10px] md:text-xs font-bold opacity-40 uppercase tracking-[0.3em]">{t.health_label}</p>
+                      </div>
+                      <div className="text-5xl md:text-6xl font-black tabular-nums tracking-tighter">{Math.round(ratio)}<span className="text-xl md:text-2xl opacity-40">%</span></div>
+                    </div>
+                    <div className={`h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-white/10' : 'bg-black/10'}`}>
+                      <div style={{ width: `${ratio}%` }} className="h-full bg-[#FF7A00] transition-all duration-1000" />
+                    </div>
+                    <div className={`p-4 border rounded-sm transition-all ${ratio < 100 ? 'bg-[#FF7A00]/5 border-[#FF7A00]/20' : (isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10')}`}>
+                      <p className={`text-xs md:text-sm font-bold uppercase tracking-[0.15em] ${ratio < 100 ? 'text-[#FF7A00]' : 'opacity-60'}`}>
+                        {totals.client === 0 ? t.awaiting : (ratio < 100 ? t.deficit.replace('{h}', (((totals.client / settings.ratioClient) * settings.ratioSuper) - totals.super).toFixed(1)) : t.verified)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 3. DATA IMPORT & BACKUPS */}
             <div className={`p-6 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
-              <button onClick={() => setOpenAccordion(openAccordion === 'params' ? null : 'params')} className="w-full flex justify-between items-center group">
+              <button onClick={() => setOpenAccordion(openAccordion === 'import' ? null : 'import')} className="w-full flex justify-between items-center group">
                 <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3">
+                  <Download className="w-5 h-5 text-[#FF7A00]" /> Data Tools
+                </h3>
+                <ChevronUp className={`w-5 h-5 transition-transform ${openAccordion === 'import' ? '' : 'rotate-180'}`} />
+              </button>
+              {openAccordion === 'import' && (
+                <div className="mt-8 space-y-4 animate-in fade-in slide-in-from-top-2">
+                  <button onClick={downloadBackup} className={`w-full py-5 border-2 hover:border-[#FF7A00] text-sm font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>Manual Backup (.json)</button>
+                  <div className="relative">
+                    <input type="file" accept=".json" onChange={restoreBackup} className="absolute inset-0 opacity-0 cursor-pointer" />
+                    <button className={`w-full py-5 border-2 border-dashed hover:border-[#FF7A00] text-sm font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>Restore Data (.json)</button>
+                  </div>
+                  <div className="relative">
+                    <input type="file" accept=".ics" onChange={handleICal} className="absolute inset-0 opacity-0 cursor-pointer" />
+                    <button className={`w-full py-5 border-2 border-dashed hover:border-[#FF7A00] text-sm font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>iCal Upload</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+          </aside>
+
+          <main className="lg:col-span-8 flex flex-col gap-8">
+            
+            {/* PARAMETERS (Wide View) */}
+            <div className={`p-6 md:p-10 rounded-sm border ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
+              <button onClick={() => setOpenAccordion(openAccordion === 'params' ? null : 'params')} className="w-full flex justify-between items-center group outline-none">
+                <h3 className="text-base md:text-lg font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 flex items-center gap-3 transition-all">
                   <Sliders className="w-5 h-5 text-[#FF7A00]" /> {t.header_params}
                 </h3>
-                <ChevronUp className={`w-5 h-5 transition-transform ${openAccordion === 'params' ? '' : 'rotate-180'}`} />
+                <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'params' ? '' : 'rotate-180'}`} />
               </button>
               
               {openAccordion === 'params' && (
@@ -589,19 +681,19 @@ export default function App() {
                    
                    {/* SYSTEM LANGUAGE */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'language' ? null : 'language')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">System Language</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'language' ? null : 'language')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">System Language</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'language' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'language' && (
-                      <div className="pt-4 pb-2 animate-in fade-in">
-                        <select value={settings.lang} onChange={e => setSettings({...settings, lang: e.target.value})} className={`w-full bg-transparent border-b py-2 text-base font-bold outline-none ${isDark ? 'text-[#FF7A00] bg-[#1c1c1c]' : 'text-[#121212] hover:text-[#FF7A00] focus:text-[#FF7A00] bg-white'}`}>
-                            <option value="en">English</option>
-                            <option value="cy">Cymraeg (Welsh)</option>
-                            <option value="pl">Polski (Polish)</option>
-                            <option value="es">Español (Spanish)</option>
-                            <option value="fr">Français (French)</option>
-                            <option value="de">Deutsch (German)</option>
+                      <div className="pt-6 pb-4 animate-in fade-in">
+                        <select value={settings.lang} onChange={e => setSettings({...settings, lang: e.target.value})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${isDark ? 'text-white border-white/10' : 'text-[#121212] border-black/10'}`}>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="en">English</option>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="cy">Cymraeg (Welsh)</option>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="pl">Polski (Polish)</option>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="es">Español (Spanish)</option>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="fr">Français (French)</option>
+                            <option className={isDark ? "bg-[#1c1c1c] text-white" : ""} value="de">Deutsch (German)</option>
                         </select>
                       </div>
                     )}
@@ -609,40 +701,40 @@ export default function App() {
 
                    {/* CYCLE SETTINGS */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'cycle' ? null : 'cycle')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Cycle Settings</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'cycle' ? null : 'cycle')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Cycle Settings</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'cycle' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'cycle' && (
-                      <div className="pt-4 pb-2 animate-in fade-in">
-                        <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">Active Cycle Start Date</label>
-                        <input type="date" value={settings.cycleStartDate || ''} onChange={e => setSettings({...settings, cycleStartDate: e.target.value})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${isDark ? 'text-[#FF7A00] border-white/5 [color-scheme:dark]' : 'text-[#121212] hover:text-[#FF7A00] focus:text-[#FF7A00] border-black/10'}`} />
+                      <div className="pt-6 pb-4 animate-in fade-in">
+                        <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">Active Cycle Start Date</label>
+                        <input type="date" value={settings.cycleStartDate || ''} onChange={e => setSettings({...settings, cycleStartDate: e.target.value})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${isDark ? 'text-[#FF7A00] border-white/5 [color-scheme:dark]' : 'text-[#121212] hover:text-[#FF7A00] focus:text-[#FF7A00] border-black/10'}`} />
                       </div>
                     )}
                    </div>
 
                    {/* RATIO TARGET */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'ratio' ? null : 'ratio')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Ratio Target</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'ratio' ? null : 'ratio')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Ratio Target</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'ratio' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'ratio' && (
-                      <div className="pt-4 pb-2 space-y-4 animate-in fade-in">
+                      <div className="pt-6 pb-4 space-y-6 animate-in fade-in">
                         <div className="flex items-center justify-between">
                           <label className="text-xs md:text-sm font-black opacity-70 uppercase tracking-widest">Enable Target</label>
-                          <input type="checkbox" checked={settings.trackRatio} onChange={e => setSettings({...settings, trackRatio: e.target.checked})} className="accent-[#FF7A00] w-4 h-4" />
+                          <input type="checkbox" checked={settings.trackRatio} onChange={e => setSettings({...settings, trackRatio: e.target.checked})} className="accent-[#FF7A00] w-5 h-5" />
                         </div>
                         {settings.trackRatio && (
-                          <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-6">
                             <div className="flex-1">
-                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">Client Target Ratio</label>
-                              <input type="number" value={settings.ratioClient} onChange={e => setSettings({...settings, ratioClient: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${inputColorClass}`} />
+                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">Client Target Ratio</label>
+                              <input type="number" value={settings.ratioClient} onChange={e => setSettings({...settings, ratioClient: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${inputColorClass}`} />
                             </div>
-                            <span className="opacity-40 mt-4">:</span>
+                            <span className="opacity-40 mt-6 text-xl">:</span>
                             <div className="flex-1">
-                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">Super Target Ratio</label>
-                              <input type="number" value={settings.ratioSuper} onChange={e => setSettings({...settings, ratioSuper: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${inputColorClass}`} />
+                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">Super Target Ratio</label>
+                              <input type="number" value={settings.ratioSuper} onChange={e => setSettings({...settings, ratioSuper: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${inputColorClass}`} />
                             </div>
                           </div>
                         )}
@@ -652,27 +744,27 @@ export default function App() {
 
                    {/* STARTING BALANCES */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'balances' ? null : 'balances')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Starting Balances</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'balances' ? null : 'balances')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Starting Balances</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'balances' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'balances' && (
-                      <div className="pt-4 pb-2 space-y-4 animate-in fade-in">
+                      <div className="pt-6 pb-4 space-y-6 animate-in fade-in">
                         <div className="flex items-center justify-between">
                           <label className="text-xs md:text-sm font-black opacity-70 uppercase tracking-widest">Enable Start Date</label>
-                          <input type="checkbox" checked={settings.enableGlobalStart} onChange={e => setSettings({...settings, enableGlobalStart: e.target.checked})} className="accent-[#FF7A00] w-4 h-4" />
+                          <input type="checkbox" checked={settings.enableGlobalStart} onChange={e => setSettings({...settings, enableGlobalStart: e.target.checked})} className="accent-[#FF7A00] w-5 h-5" />
                         </div>
                         {settings.enableGlobalStart && (
                           <div>
-                            <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">Log Start Date (Overrides All Time)</label>
-                            <input type="date" value={settings.globalStartDate || ''} onChange={e => setSettings({...settings, globalStartDate: e.target.value})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${isDark ? 'text-[#FF7A00] border-white/5 [color-scheme:dark]' : 'text-[#121212] hover:text-[#FF7A00] focus:text-[#FF7A00] border-black/10'}`} />
+                            <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">Log Start Date (Overrides All Time)</label>
+                            <input type="date" value={settings.globalStartDate || ''} onChange={e => setSettings({...settings, globalStartDate: e.target.value})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${isDark ? 'text-[#FF7A00] border-white/5 [color-scheme:dark]' : 'text-[#121212] hover:text-[#FF7A00] focus:text-[#FF7A00] border-black/10'}`} />
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-4 pt-2">
+                        <div className="grid grid-cols-2 gap-6 pt-2">
                           {['client', 'super', 'therapy', 'cpd'].map(k => (
                             <div key={k}>
-                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">{k}</label>
-                              <input type="number" value={settings.startingBalances[k]} onChange={e => setSettings({...settings, startingBalances: {...settings.startingBalances, [k]: e.target.value === '' ? 0 : parseFloat(e.target.value)}})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${inputColorClass}`} />
+                              <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">{k}</label>
+                              <input type="number" value={settings.startingBalances[k]} onChange={e => setSettings({...settings, startingBalances: {...settings.startingBalances, [k]: e.target.value === '' ? 0 : parseFloat(e.target.value)}})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${inputColorClass}`} />
                             </div>
                           ))}
                         </div>
@@ -682,22 +774,22 @@ export default function App() {
 
                    {/* CLINICAL GOALS */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'goals' ? null : 'goals')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Clinical Goals</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'goals' ? null : 'goals')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Clinical Goals</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'goals' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'goals' && (
-                      <div className="pt-4 pb-2 space-y-4 animate-in fade-in">
+                      <div className="pt-6 pb-4 space-y-6 animate-in fade-in">
                         <div className="flex items-center justify-between">
                           <label className="text-xs md:text-sm font-black opacity-70 uppercase tracking-widest">Enable Goals</label>
-                          <input type="checkbox" checked={settings.isTrainee} onChange={e => setSettings({...settings, isTrainee: e.target.checked})} className="accent-[#FF7A00] w-4 h-4" />
+                          <input type="checkbox" checked={settings.isTrainee} onChange={e => setSettings({...settings, isTrainee: e.target.checked})} className="accent-[#FF7A00] w-5 h-5" />
                         </div>
                         {settings.isTrainee && (
-                          <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-6">
                             {['globalGoal', 'superGoal', 'goal', 'cpdGoal'].map((g, idx) => (
                               <div key={g}>
-                                <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">{['Client', 'Supervision', 'Therapy', 'CPD'][idx]} Target</label>
-                                <input type="number" value={settings[g]} onChange={e => setSettings({...settings, [g]: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${inputColorClass}`} />
+                                <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">{['Client', 'Supervision', 'Therapy', 'CPD'][idx]} Target</label>
+                                <input type="number" value={settings[g]} onChange={e => setSettings({...settings, [g]: e.target.value === '' ? 0 : parseFloat(e.target.value)})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg font-bold outline-none ${inputColorClass}`} />
                               </div>
                             ))}
                           </div>
@@ -706,102 +798,99 @@ export default function App() {
                     )}
                    </div>
 
-                   {/* SYNC KEYWORDS */}
+                   {/* SYNC RULES */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'keywords' ? null : 'keywords')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Sync Keywords</span>
-                      <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'keywords' ? '' : 'rotate-180'}`} />
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'rules' ? null : 'rules')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Sync Rules</span>
+                      <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'rules' ? '' : 'rotate-180'}`} />
                     </button>
-                    {openSubParam === 'keywords' && (
-                      <div className="pt-4 pb-2 grid grid-cols-1 gap-4 animate-in fade-in">
-                        {['client', 'super', 'therapy', 'cpd'].map(key => (
-                          <div key={key} className="space-y-1">
-                            <label className="text-[10px] md:text-xs font-black opacity-50 uppercase text-[#FF7A00] mb-1">{labels[key]} Keywords</label>
-                            <input value={settings.keywords[key]} onChange={e => setSettings({...settings, keywords: {...settings.keywords, [key]: e.target.value}})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base font-bold outline-none ${inputColorClass}`} />
+                    {openSubParam === 'rules' && (
+                      <div className="pt-6 pb-4 space-y-8 animate-in fade-in">
+                        
+                        {/* Keyword Sync Section */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b pb-4 border-dashed border-[#FF7A00]/30">
+                            <label className="text-xs md:text-sm font-black opacity-70 uppercase tracking-widest text-[#FF7A00]">1. Keyword Matching</label>
+                            <input type="checkbox" checked={settings.enableKeywords} onChange={e => setSettings({...settings, enableKeywords: e.target.checked})} className="accent-[#FF7A00] w-5 h-5" />
                           </div>
-                        ))}
+                          {settings.enableKeywords && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {['client', 'super', 'therapy', 'cpd'].map(key => (
+                                <div key={`kw-${key}`} className="space-y-1">
+                                  <label className="text-[10px] md:text-xs font-black opacity-50 uppercase text-[#FF7A00] mb-2">{labels[key]} Keywords</label>
+                                  <input value={settings.keywords[key]} onChange={e => setSettings({...settings, keywords: {...settings.keywords, [key]: e.target.value}})} className={`w-full bg-transparent border-b py-2 text-base md:text-sm font-bold outline-none ${inputColorClass}`} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Color Sync Section */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b pb-4 border-dashed border-[#FF7A00]/30">
+                            <label className="text-xs md:text-sm font-black opacity-70 uppercase tracking-widest text-[#FF7A00]">2. Calendar Color Matching</label>
+                            <input type="checkbox" checked={settings.enableColors} onChange={e => setSettings({...settings, enableColors: e.target.checked})} className="accent-[#FF7A00] w-5 h-5" />
+                          </div>
+                          {settings.enableColors && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {['client', 'super', 'therapy', 'cpd'].map(key => (
+                                <div key={`color-${key}`} className="space-y-1">
+                                  <label className="text-[10px] md:text-xs font-black opacity-50 uppercase text-[#FF7A00] mb-2">{labels[key]} Color</label>
+                                  <div className="relative">
+                                    <select value={settings.colors?.[key] || ''} onChange={e => setSettings({...settings, colors: {...settings.colors, [key]: e.target.value}})} className={`w-full bg-transparent border-b py-2 pl-6 text-base md:text-sm font-bold outline-none appearance-none ${isDark ? 'text-white border-white/10' : 'text-[#121212] border-black/10'}`}>
+                                      {GOOGLE_COLORS.map(c => (
+                                        <option key={c.id} className={isDark ? "bg-[#1c1c1c] text-white" : "bg-white text-[#121212]"} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border border-black/20 dark:border-white/20" style={{ backgroundColor: GOOGLE_COLORS.find(c => c.id === (settings.colors?.[key] || ''))?.hex || 'transparent' }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
                       </div>
                     )}
                    </div>
 
                    {/* NOMENCLATURE */}
                    <div>
-                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'nomenclature' ? null : 'nomenclature')} className={`w-full flex justify-between items-center py-3 border-b group ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-                      <span className="text-sm font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Nomenclature</span>
+                    <button type="button" onClick={() => setOpenSubParam(openSubParam === 'nomenclature' ? null : 'nomenclature')} className={`w-full flex justify-between items-center py-4 border-b group outline-none ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+                      <span className="text-sm md:text-base font-black opacity-80 uppercase tracking-widest group-hover:text-[#FF7A00] transition-colors">Nomenclature</span>
                       <ChevronUp className={`w-4 h-4 opacity-40 transition-transform ${openSubParam === 'nomenclature' ? '' : 'rotate-180'}`} />
                     </button>
                     {openSubParam === 'nomenclature' && (
-                      <div className="pt-4 pb-2 grid grid-cols-2 gap-4 animate-in fade-in">
+                      <div className="pt-6 pb-4 grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                         {['client', 'super', 'therapy', 'cpd'].map(key => (
                           <div key={key}>
-                             <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-1">{key} Label</label>
-                             <input value={settings.labels[key]} placeholder={key} onChange={e => setSettings({...settings, labels: {...settings.labels, [key]: e.target.value}})} className={`w-full bg-transparent border-b py-2 text-sm md:text-base outline-none font-bold ${inputColorClass}`} />
+                             <label className="text-[10px] md:text-xs font-black opacity-50 uppercase block text-[#FF7A00] mb-2">{key} Label</label>
+                             <input value={settings.labels[key]} placeholder={key} onChange={e => setSettings({...settings, labels: {...settings.labels, [key]: e.target.value}})} className={`w-full bg-transparent border-b py-2 text-base md:text-lg outline-none font-bold ${inputColorClass}`} />
                           </div>
                         ))}
                       </div>
                     )}
                    </div>
 
-                   <div className="pt-6 space-y-3">
-                     <button onClick={handleSaveParams} className={`w-full py-5 border-2 hover:border-[#FF7A00] hover:text-[#FF7A00] font-black text-sm uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>{saveStatus || "SAVE PARAMETERS"}</button>
-                     <button onClick={handleResetParams} className={`w-full py-5 font-black text-sm uppercase tracking-widest transition-all ${resetConfirm ? 'bg-rose-500 text-white shadow-lg' : 'text-rose-500 hover:bg-rose-500/10'}`}>
+                   <div className="pt-10 flex flex-col md:flex-row gap-4">
+                     <button onClick={handleSaveParams} className={`flex-1 py-5 border-2 hover:border-[#FF7A00] hover:text-[#FF7A00] font-black text-sm uppercase tracking-widest transition-all ${isDark ? 'border-white/10' : 'border-black/10'}`}>{saveStatus || "SAVE PARAMETERS"}</button>
+                     <button onClick={handleResetParams} className={`flex-1 py-5 font-black text-sm uppercase tracking-widest transition-all ${resetConfirm ? 'bg-rose-500 text-white shadow-lg' : 'text-rose-500 hover:bg-rose-500/10'}`}>
                         {resetConfirm ? "CONFIRM RESET?" : "RESET ALL"}
                      </button>
                    </div>
                 </div>
               )}
             </div>
-          </aside>
 
-          <main className="lg:col-span-8">
-            <div className="space-y-8">
-              <div className={`flex flex-col md:flex-row md:justify-between md:items-end border-b pb-6 gap-4 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                <div>
-                  <button onClick={() => setOpenAccordion(openAccordion === 'records' ? null : 'records')} className="flex items-center gap-3 group">
-                    <h3 className="text-base font-black uppercase tracking-[0.4em] opacity-40 group-hover:opacity-100 transition-all">Active Records</h3>
-                    <ChevronUp className={`w-5 h-5 transition-transform opacity-40 group-hover:opacity-100 ${openAccordion === 'records' ? '' : 'rotate-180'}`} />
-                  </button>
-                  <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#FF7A00] opacity-80 mt-2 flex items-center gap-2">
-                    <BookOpen className="w-3 h-3" /> Tap any record below to manage clinical notes
-                  </p>
-                </div>
-                <div className="flex gap-5 opacity-60">
-                  <Table className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportCSV} title="Export CSV" />
-                  <Download className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportCSV} title="Download Records" />
-                  <Printer className="w-5 h-5 cursor-pointer hover:text-[#FF7A00]" onClick={exportPDF} title="Print PDF" />
-                </div>
-              </div>
-              
-              {openAccordion === 'records' && (
-                <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2 custom-scroll">
-                  {displayedEntries.map(e => (
-                    <div key={e.id} onClick={() => setReflectionEntry(e)} className={`flex justify-between items-center p-8 border hover:border-[#FF7A00] transition-all cursor-pointer group rounded-sm shadow-sm ${isDark ? 'bg-[#1c1c1c] border-white/5' : 'bg-white border-black/10'}`}>
-                      <div className="flex items-center gap-8">
-                        <div className={`w-1.5 h-14 ${e.type === 'super' ? 'bg-[#FF7A00]' : (isDark ? 'bg-white/10' : 'bg-black/10')}`} />
-                        <div>
-                          <p className="text-base font-black uppercase tracking-widest">{labels[e.type]}</p>
-                          {e.title && <p className="text-sm font-bold opacity-80 mt-0.5 truncate max-w-[150px] md:max-w-xs">{e.title}</p>}
-                          <p className={`text-sm font-bold ${e.title ? 'opacity-40 mt-1' : 'opacity-50'}`}>{e.date}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6 md:gap-8">
-                        {e.notes && e.notes.trim() !== '' && (
-                          <BookOpen className="w-5 h-5 text-[#FF7A00] opacity-60" title="Contains Notes" />
-                        )}
-                        <p className="text-3xl font-black tabular-nums">{e.hours.toFixed(1)}H</p>
-                      </div>
-                    </div>
-                  ))}
-                  {displayedEntries.length === 0 && <div className="py-24 text-center opacity-30 text-base font-black tracking-widest">NO RECORDS LOGGED</div>}
-                </div>
-              )}
-            </div>
           </main>
         </div>
+
       </div>
 
-      {/* STANDARD CLEAN FOOTER - REDUCED PADDING */}
-      <footer className={`mt-8 pt-6 pb-24 md:pb-20 border-t ${isDark ? 'border-white/5' : 'border-black/10'}`}>
+      {/* STANDARD CLEAN FOOTER */}
+      <footer className={`mt-16 pt-6 pb-24 md:pb-20 border-t ${isDark ? 'border-white/5' : 'border-black/10'}`}>
         <div className="max-w-6xl mx-auto px-6 w-full flex flex-col md:flex-row justify-center items-center gap-6 md:gap-12">
           <div onClick={() => setShowPrivacy(true)} className="flex items-center gap-2 cursor-pointer opacity-50 hover:opacity-100 hover:text-[#FF7A00] transition-colors text-[10px] md:text-xs font-black uppercase tracking-widest">
             <Download className="w-4 h-4 md:w-5 md:h-5" /> Local Data & Backups
@@ -809,19 +898,30 @@ export default function App() {
           <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 cursor-pointer opacity-50 hover:opacity-100 hover:text-[#FF7A00] transition-colors text-[10px] md:text-xs font-black uppercase tracking-widest">
             <Shield className="w-4 h-4 md:w-5 md:h-5" /> Legal Privacy & Terms
           </a>
+          <a href="https://github.com/BuiltByLiam" target="_blank" rel="noreferrer" className="flex items-center gap-2 cursor-pointer text-[#FF7A00] brightness-125 hover:brightness-150 transition-all text-[10px] md:text-xs font-black uppercase tracking-widest">
+            Built By Liam
+          </a>
         </div>
       </footer>
 
-      {/* STICKY NAV - Branding, Buttons, Coffee */}
+      {/* STICKY NAV - THE SYNC HUB */}
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-xl px-4 py-4 md:py-5 transition-colors duration-500 ${isDark ? 'border-white/10 bg-[#121212]/90' : 'border-black/10 bg-[#e8e7e7]/90'}`}>
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           
-          {/* Left: Built By Liam */}
-          <div className="flex-1 flex justify-start">
-            <a href="https://github.com/BuiltByLiam" target="_blank" rel="noreferrer" className="text-[10px] md:text-xs font-black uppercase tracking-[0.1em] md:tracking-[0.3em] text-[#FF7A00] brightness-125 hover:opacity-80 transition-opacity whitespace-nowrap">
-              <span className="hidden sm:inline">Built By Liam</span>
-              <span className="sm:hidden">BBL</span>
-            </a>
+          {/* Left: Sync Hub */}
+          <div className="flex-1 flex justify-start items-center">
+            <div className="flex flex-col items-start">
+               <button onClick={handleGoogleSync} disabled={isSyncing} className={`flex items-center gap-2 text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${isSyncing ? 'text-[#FF7A00] opacity-100' : 'opacity-50 hover:opacity-100 hover:text-[#FF7A00]'}`}>
+                 <RefreshCw className={`w-4 h-4 md:w-5 md:h-5 ${isSyncing ? 'animate-spin text-[#FF7A00]' : ''}`} />
+                 <span className="hidden sm:inline">{isSyncing ? 'SYNCING...' : 'SYNC ENGINE'}</span>
+                 <span className="sm:hidden">{isSyncing ? 'SYNCING' : 'SYNC'}</span>
+               </button>
+               {lastSynced && !isSyncing && (
+                 <span className="text-[8px] md:text-[9px] font-bold uppercase tracking-widest opacity-30 mt-1 flex items-center gap-1">
+                   <CheckCircle className="w-2.5 h-2.5" /> Last: {lastSynced}
+                 </span>
+               )}
+            </div>
           </div>
 
           {/* Center: View Toggles */}
@@ -835,7 +935,7 @@ export default function App() {
 
           {/* Right: Coffee */}
           <div className="flex-1 flex justify-end">
-            <a href="https://www.buymeacoffee.com/BUILT_BY_LIAM" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-black uppercase tracking-widest opacity-50 hover:opacity-100 hover:text-[#FF7A00] transition-colors whitespace-nowrap">
+            <a href="https://www.buymeacoffee.com/BUILT_BY_LIAM" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-black uppercase tracking-widest text-[#FF7A00] brightness-125 hover:brightness-150 transition-all whitespace-nowrap">
               <Coffee className="w-3 h-3 md:w-4 md:h-4" /> 
               <span className="hidden sm:inline">Buy me a coffee</span>
               <span className="sm:hidden">Coffee</span>
@@ -921,17 +1021,13 @@ export default function App() {
               </div>
               <div>
                 <strong className="text-[#FF7A00] uppercase tracking-widest block mb-2">Restoring Your Data</strong>
-                <p>To move your data to a new device or recover a previous state, use the "Manual Backup" button below to download your secure <code>.json</code> file, then use "Restore Data" on your target device to import it.</p>
+                <p>To move your data to a new device or recover a previous state, use the "Manual Backup" button in the Data Tools sidebar to download your secure <code>.json</code> file, then use "Restore Data" on your target device to import it.</p>
               </div>
             </div>
             <div className="shrink-0 space-y-4">
                 <button onClick={() => { setShowPrivacy(false); setShowWelcome(true); }} className={`w-full py-4 border-2 hover:border-[#FF7A00] hover:text-[#FF7A00] text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isDark ? 'border-white/10 text-[#e8e7e7]' : 'border-black/10 text-[#121212]'}`}>
                   <RefreshCw className="w-4 h-4" /> Replay Welcome Tour
                 </button>
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={downloadBackup} className="py-5 border-2 border-[#FF7A00]/20 hover:border-[#FF7A00] text-[#FF7A00] text-xs font-black uppercase tracking-widest transition-all">Manual Backup</button>
-                  <label className="py-5 border-2 border-[#FF7A00]/20 hover:border-[#FF7A00] text-[#FF7A00] text-xs font-black uppercase tracking-widest flex justify-center items-center cursor-pointer transition-all">Restore Data<input type="file" accept=".json" className="hidden" onChange={restoreBackup} /></label>
-                </div>
                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-6 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white text-xs font-black uppercase tracking-[0.4em] transition-all">Erase All Local Data</button>
             </div>
           </div>
@@ -940,9 +1036,9 @@ export default function App() {
 
       {/* REFLECTION MODAL */}
       {reflectionEntry && (
-        <div className="fixed inset-0 bg-[#121212]/95 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className={`p-10 md:p-14 rounded-sm shadow-2xl max-w-2xl w-full border border-[#FF7A00]/20 flex flex-col max-h-[90vh] ${isDark ? 'bg-[#1c1c1c]' : 'bg-white'}`}>
-            <div className={`flex justify-between items-start border-b pb-8 mb-10 shrink-0 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+        <div className="fixed inset-0 bg-[#121212]/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6 animate-in fade-in duration-300">
+          <div className={`p-8 md:p-12 rounded-sm shadow-2xl max-w-5xl w-full border border-[#FF7A00]/20 flex flex-col h-[90vh] md:h-[85vh] ${isDark ? 'bg-[#1c1c1c]' : 'bg-white'}`}>
+            <div className={`flex justify-between items-start border-b pb-6 mb-8 shrink-0 ${isDark ? 'border-white/10' : 'border-black/10'}`}>
               <div className="space-y-3">
                 <div className="flex items-center gap-4">
                   <BookOpen className="w-6 h-6 text-[#FF7A00]" />
@@ -966,12 +1062,12 @@ export default function App() {
               }}
             />
 
-            <textarea className="flex-1 bg-transparent border-b py-6 text-lg outline-none focus:border-[#FF7A00] resize-none leading-relaxed min-h-[250px]" value={reflectionEntry.notes} onChange={e => {
+            <textarea className="flex-1 bg-transparent border-b py-6 text-lg md:text-xl outline-none focus:border-[#FF7A00] resize-none leading-relaxed h-full custom-scroll" value={reflectionEntry.notes} onChange={e => {
                 const newEntries = entries.map(ent => ent.id === reflectionEntry.id ? {...ent, notes: e.target.value} : ent);
                 setEntries(newEntries);
                 setReflectionEntry({...reflectionEntry, notes: e.target.value});
               }} placeholder="Begin clinical reflection..." />
-            <div className="pt-8 md:pt-10 flex flex-col md:flex-row gap-4 md:gap-6 shrink-0">
+            <div className="pt-6 md:pt-8 flex flex-col md:flex-row gap-4 md:gap-6 shrink-0">
               <button onClick={() => { setReflectionEntry(null); setConfirmDelete(false); notify("Reflection committed."); }} className="flex-1 py-5 md:py-6 bg-[#FF7A00] text-white font-black uppercase tracking-[0.4em] text-xs shadow-lg hover:brightness-110">Commit</button>
               <div className="flex flex-1 gap-4 md:gap-6">
                   <button onClick={shareNote} className="flex-1 py-5 md:py-6 border-2 font-black uppercase tracking-[0.4em] text-xs flex items-center justify-center gap-2 md:gap-3 hover:border-[#FF7A00]"><Share className="w-4 h-4 md:w-5 md:h-5" /> Share</button>
