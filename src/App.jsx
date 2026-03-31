@@ -1198,7 +1198,7 @@ export default function App() {
           </a>
           
           <div className="flex flex-col md:flex-row items-center gap-3 md:gap-6">
-            <a href="https://github.com/BuiltByLiam" target="_blank" rel="noreferrer" className="flex items-center gap-2 cursor-pointer text-[#FF7A00] brightness-125 hover:brightness-150 transition-all text-[10px] md:text-xs font-black uppercase tracking-widest">
+            <a href="https://builtbyliam.uk" target="_blank" rel="noreferrer" className="flex items-center gap-2 cursor-pointer text-[#FF7A00] brightness-125 hover:brightness-150 transition-all text-[10px] md:text-xs font-black uppercase tracking-widest">
               Built By Liam
             </a>
             <span className="hidden md:inline opacity-30 text-[#FF7A00]">•</span>
