@@ -85,7 +85,7 @@ const i18n = {
     brand: "Creado Por Liam", title_part1: "Pract", title_part2: "isy.",
     header_sync: "Sincronización", header_entry: "Nueva Entrada", header_params: "Parámetros",
     btn_sync: "Sincronizar Google", btn_add: "Añadir Entrada",
-    opt_contact: "Cliente", opt_super: "Supervisión", opt_therapy: "Terapia", opt_cpd: "DPC",
+    opt_contact: "Cliente", opt_super: "Supervision", opt_therapy: "Terapia", opt_cpd: "DPC",
     balance_title: "Balance Practisy", health_label: "Estado de Cumplimiento",
     deficit: "Déficit: Se requieren {h} hrs de supervisión.",
     msg_saved: "GUARDADO ✓",
