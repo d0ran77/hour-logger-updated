@@ -3,7 +3,7 @@ import {
   Calendar, RefreshCw, Activity, Sliders, Table, Download, 
   Printer, Share2, Coffee, Shield, BookOpen, Trash2, Sun, Moon, 
   X, ChevronUp, Share, CheckCircle, Info, Cookie, Bell,
-  Tag, FileText, Zap, Globe, TrendingUp, Lightbulb, Mic, Maximize, Minimize, Filter, XCircle, StickyNote
+  Tag, FileText, Zap, Globe, TrendingUp, Lightbulb, Mic, Maximize, Minimize, Filter, XCircle, StickyNote, User
 } from 'lucide-react';
 
 // ============================================================================
@@ -155,7 +155,6 @@ export default function App() {
   const [showCookies, setShowCookies] = useState(false);
   const [toast, setToast] = useState(null);
   
-  // High Engagement State
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
   const [showMetricMenu, setShowMetricMenu] = useState(false);
@@ -163,14 +162,13 @@ export default function App() {
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
-  // Sync Hub States
   const [isSyncing, setIsSyncing] = useState(false);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [lastSynced, setLastSynced] = useState(() => localStorage.getItem('liam_last_sync') || null);
 
-  // Custom Two-Tap Confirmation States
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [confirmClearPrep, setConfirmClearPrep] = useState(false);
 
   const isDark = theme === 'dark';
   const inputColorClass = isDark 
@@ -283,7 +281,7 @@ export default function App() {
     return entries
       .filter(e => e.nextSessionNote && e.nextSessionNote.trim() !== '')
       .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 6); // Show top 6 most recent preps
+      .slice(0, 6);
   }, [entries]);
 
   // --- ACTIONS ---
@@ -316,19 +314,14 @@ export default function App() {
 
   const applyText = (textStr) => {
     const current = (reflectionEntry.notes || '');
-    const allTexts = [...Object.values(TEMPLATES), ...Object.values(METRICS)];
-    const isPristineOrExactMatch = current.trim() === '' || allTexts.some(tpl => tpl.trim() === current.trim());
 
-    if (isPristineOrExactMatch) {
-      if (current.trim() === textStr.trim()) {
-          updateReflection({ notes: '' }); 
-      } else {
-          updateReflection({ notes: textStr }); 
-      }
+    if (current.includes(textStr)) {
+        // If the exact unmodified template is present, toggle it off
+        updateReflection({ notes: current.replace(textStr, '').trim() }); 
     } else {
-      if (!current.includes(textStr.trim())) {
-          updateReflection({ notes: current + '\n\n' + textStr }); 
-      }
+        // Append the new template, ensuring clean spacing
+        const prefix = current === '' ? '' : current + (current.endsWith('\n\n') ? '' : '\n\n');
+        updateReflection({ notes: prefix + textStr }); 
     }
   };
 
@@ -920,7 +913,7 @@ export default function App() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
                       {prepNotes.map(e => (
                          <div key={`prep-${e.id}`} className={`p-4 md:p-5 rounded-sm border group cursor-pointer transition-all hover:border-[#FF7A00]/50 hover:shadow-md flex items-center gap-4 h-24 ${isDark ? 'bg-white/5 border-white/5' : 'bg-black/5 border-black/5'}`} onClick={() => setReflectionEntry(e)}>
-                           <div className="shrink-0 w-24 border-r border-[#FF7A00]/30 pr-4 flex flex-col justify-center">
+                           <div className="shrink-0 w-24 border-r border-[#FF7A00]/30 pr-4 flex flex-col justify-center h-full">
                              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest opacity-50 truncate">{labels[e.type]}</span>
                              <span className="text-[9px] font-bold opacity-40">{e.date}</span>
                            </div>
@@ -1410,6 +1403,7 @@ export default function App() {
                       + Add Tag
                     </button>
 
+                    {/* Popover Tag Menu */}
                     {showTagMenu && (
                       <>
                         <div className="fixed inset-0 z-[105]" onClick={() => setShowTagMenu(false)}></div>
@@ -1481,7 +1475,7 @@ export default function App() {
                     {showMetricMenu && (
                       <>
                         <div className="fixed inset-0 z-[105]" onClick={() => setShowMetricMenu(false)}></div>
-                        <div className="absolute top-full right-0 md:left-0 mt-3 w-[260px] max-w-[85vw] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-[110] p-4 md:p-5 animate-in fade-in slide-in-from-top-2">
+                        <div className="absolute top-full right-0 md:left-0 md:right-auto mt-3 w-[260px] max-w-[85vw] bg-white dark:bg-[#1c1c1c] border border-black/10 dark:border-white/10 rounded-md shadow-2xl z-[110] p-4 md:p-5 animate-in fade-in slide-in-from-top-2">
                            <div className="flex justify-between items-center mb-4">
                               <span className="text-xs font-black uppercase tracking-widest opacity-50">Select Measure</span>
                               <X className="w-4 h-4 cursor-pointer opacity-50 hover:opacity-100" onClick={() => setShowMetricMenu(false)} />
